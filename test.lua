@@ -48,28 +48,31 @@ RunService.Stepped:Connect(function()
 end)
 
 -- ========== ANTI FALL ==========
+local antiFallOn = false
+
 RunService.Heartbeat:Connect(function()
     if antiFallOn then
         local char = player.Character
         if char then
             local root = char:FindFirstChild("HumanoidRootPart")
-            if root and root.Position.Y < minY then
-                root.CFrame = CFrame.new(
-                    root.Position.X, 
-                    minY,  -- lock Y ไว้ตรงนี้เลย
-                    root.Position.Z
-                )
-                root.Velocity = Vector3.new(
-                    root.Velocity.X, 
-                    0,  -- หยุด velocity แกน Y
-                    root.Velocity.Z
-                )
+            if root then
+                if root.Velocity.Y < -10 then -- ลด threshold ลงค่ะ
+                    root.Velocity = Vector3.new(
+                        root.Velocity.X,
+                        0,
+                        root.Velocity.Z
+                    )
+                end
             end
         end
     end
 end)
 
 -- ========== UI ==========
+-- ========== แก้ปุ่มปิด ==========
+closeBtn.ZIndex = 5 -- ให้อยู่บนสุด
+titleBar.ZIndex = 2
+
 local screenGui = Instance.new("ScreenGui", playerGui)
 screenGui.ResetOnSpawn = false
 screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
@@ -203,7 +206,7 @@ makeToggle("No Clip", 0.62, function(on)
     noclipOn = on
 end)
 
-makeToggle("Anti Fall (Y≥" .. minY .. ")", 0.79, function(on)
+makeToggle("Anti Fall", 0.79, function(on)
     antiFallOn = on
 end)
 
