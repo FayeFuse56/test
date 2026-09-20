@@ -40,7 +40,7 @@ jobs:
       - name: Package
         run: |
           mkdir -p FayFPS/dist/pkg
-          cp FayFPS/build/out/arm64-v8a/libfayfps_mod.so FayFPS/dist/pkg/
+          cp FayFPS/build/libfayfps_mod.so FayFPS/dist/pkg/
           cp FayFPS/manifest.json FayFPS/dist/pkg/manifest.json
           cd FayFPS/dist/pkg
           zip -r ../Fay-FPS-Optimizer-v0.1.0.levipack .
