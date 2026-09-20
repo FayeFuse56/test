@@ -1,0 +1,8 @@
+{
+  "type": "preload-native",
+  "name": "Fay FPS Optimizer",
+  "author": "Faye",
+  "version": "0.1.0",
+  "entry": "libfayfps_mod.so",
+  "minecraft_versions": []
+}
