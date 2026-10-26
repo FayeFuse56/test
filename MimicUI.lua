@@ -1063,6 +1063,82 @@ do
         end)
         log("STATUS", nil, "started")
     end
+    -- Live on-screen log viewer
+    local viewer = Instance.new("Frame")
+    viewer.Name = "LiveLogViewer"
+    viewer.Size = UDim2.fromOffset(340, 270)
+    viewer.Position = UDim2.new(1, -350, 0, 80)
+    viewer.BackgroundColor3 = Color3.fromRGB(15, 17, 27)
+    viewer.Parent = screenGui
+    viewer.Active = true
+    Instance.new("UICorner", viewer).CornerRadius = UDim.new(0, 10)
+    local header = Instance.new("TextLabel")
+    header.Size = UDim2.new(1, -12, 0, 30)
+    header.Position = UDim2.fromOffset(6, 2)
+    header.BackgroundTransparency = 1
+    header.Text = "MIMIC LIVE LOGS"
+    header.TextColor3 = Color3.fromRGB(130, 180, 255)
+    header.TextSize = 14
+    header.Font = Enum.Font.GothamBold
+    header.Parent = viewer
+    local logScroll = Instance.new("ScrollingFrame")
+    logScroll.Size = UDim2.new(1, -12, 1, -80)
+    logScroll.Position = UDim2.fromOffset(6, 34)
+    logScroll.BackgroundColor3 = Color3.fromRGB(23, 25, 38)
+    logScroll.BorderSizePixel = 0
+    logScroll.ScrollBarThickness = 4
+    logScroll.CanvasSize = UDim2.fromOffset(0, 0)
+    logScroll.Parent = viewer
+    local logText = Instance.new("TextLabel")
+    logText.Size = UDim2.new(1, -10, 0, 20)
+    logText.Position = UDim2.fromOffset(5, 4)
+    logText.BackgroundTransparency = 1
+    logText.Text = "No logs yet. Press Start / Stop Log."
+    logText.TextColor3 = Color3.fromRGB(210, 220, 235)
+    logText.Font = Enum.Font.Code
+    logText.TextSize = 11
+    logText.TextXAlignment = Enum.TextXAlignment.Left
+    logText.TextYAlignment = Enum.TextYAlignment.Top
+    logText.TextWrapped = true
+    logText.Parent = logScroll
+    local clearBtn = Instance.new("TextButton")
+    clearBtn.Size = UDim2.fromOffset(100, 30)
+    clearBtn.Position = UDim2.new(0, 8, 1, -36)
+    clearBtn.BackgroundColor3 = Color3.fromRGB(60, 65, 95)
+    clearBtn.TextColor3 = Color3.new(1, 1, 1)
+    clearBtn.Text = "Clear Logs"
+    clearBtn.TextSize = 12
+    clearBtn.Parent = viewer
+    clearBtn.MouseButton1Click:Connect(function()
+        table.clear(logs)
+        logText.Text = "Logs cleared."
+    end)
+    local hideBtn = Instance.new("TextButton")
+    hideBtn.Size = UDim2.fromOffset(110, 30)
+    hideBtn.Position = UDim2.new(1, -118, 1, -36)
+    hideBtn.BackgroundColor3 = Color3.fromRGB(45, 65, 105)
+    hideBtn.TextColor3 = Color3.new(1, 1, 1)
+    hideBtn.Text = "Hide / Show"
+    hideBtn.TextSize = 12
+    hideBtn.Parent = viewer
+    hideBtn.MouseButton1Click:Connect(function()
+        logScroll.Visible = not logScroll.Visible
+    end)
+    local lastLogCount = -1
+    task.spawn(function()
+        while viewer.Parent do
+            if #logs ~= lastLogCount then
+                lastLogCount = #logs
+                logText.Text = #logs > 0 and table.concat(logs, "\\n") or "No logs yet."
+                local lines = math.max(1, #logs)
+                local height = math.max(20, lines * 42)
+                logText.Size = UDim2.new(1, -10, 0, height)
+                logScroll.CanvasSize = UDim2.fromOffset(0, height + 10)
+                logScroll.CanvasPosition = Vector2.new(0, math.max(0, height - logScroll.AbsoluteSize.Y))
+            end
+            task.wait(0.35)
+        end
+    end)
     local diagnosticPanel = Instance.new("Frame")
     diagnosticPanel.Name = "DiagnosticPanel"
     diagnosticPanel.Size = UDim2.fromOffset(290, 120)
