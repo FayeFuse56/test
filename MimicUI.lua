@@ -998,189 +998,222 @@ print("[MimicUI v2] โหลดสำเร็จ ✓")
 
 
 -- ============================================
--- Diagnostic v3: bounded client-side logger
+-- Mimic Diagnostic v3.2 — live, draggable, bounded
 -- ============================================
 do
-    local MAX_LOGS, RANGE, MAX_TARGETS = 160, 100, 24
-    local logs, watched, active = {}, {}, false
+    local PromptService = game:GetService("ProximityPromptService")
+    local MAX_LOGS, RADIUS, MAX_PARTS = 180, 100, 150
+    local logs, seenHumanoids, watchedClicks = {}, {}, {}
+    local enabled = false
     local connections = {}
-    local scanConn
-    local function log(kind, obj, detail)
-        local path = obj and obj:GetFullName() or "-"
-        local line = string.format("[%.1f] %s | %s | %s", os.clock(), kind, path, tostring(detail or ""))
-        table.insert(logs, line)
+    local revision = 0
+    local viewer = Instance.new("Frame")
+    viewer.Name = "LiveLogViewer"
+    viewer.Size = UDim2.fromOffset(310, 310)
+    viewer.Position = UDim2.new(0.5, -155, 0.25, 0)
+    viewer.BackgroundColor3 = Color3.fromRGB(17, 20, 32)
+    viewer.BorderSizePixel = 0
+    viewer.Active = true
+    viewer.ZIndex = 30
+    viewer.Parent = screenGui
+    Instance.new("UICorner", viewer).CornerRadius = UDim.new(0, 10)
+    local stroke = Instance.new("UIStroke", viewer)
+    stroke.Color = Color3.fromRGB(95, 130, 235)
+    local bar = Instance.new("TextButton")
+    bar.Name = "DragHandle"
+    bar.Text = "≡  MIMIC DIAGNOSTIC  •  drag here"
+    bar.Font = Enum.Font.GothamBold
+    bar.TextSize = 12
+    bar.TextColor3 = Color3.fromRGB(210, 225, 255)
+    bar.BackgroundColor3 = Color3.fromRGB(35, 43, 72)
+    bar.Size = UDim2.new(1, 0, 0, 36)
+    bar.ZIndex = 31
+    bar.Parent = viewer
+    Instance.new("UICorner", bar).CornerRadius = UDim.new(0, 10)
+    local dragging, dragStart, startPos, dragInput
+    bar.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = true
+            dragStart = input.Position
+            startPos = viewer.Position
+            dragInput = input
+        end
+    end)
+    UserInputService.InputChanged:Connect(function(input)
+        if not dragging then return end
+        if input.UserInputType == Enum.UserInputType.MouseMovement or input == dragInput then
+            local delta = input.Position - dragStart
+            viewer.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+        end
+    end)
+    UserInputService.InputEnded:Connect(function(input)
+        if input == dragInput or (dragInput and dragInput.UserInputType == Enum.UserInputType.MouseButton1 and input.UserInputType == Enum.UserInputType.MouseButton1) then
+            dragging = false
+        end
+    end)
+    local scroll = Instance.new("ScrollingFrame")
+    scroll.Name = "Events"
+    scroll.Position = UDim2.fromOffset(7, 42)
+    scroll.Size = UDim2.new(1, -14, 1, -96)
+    scroll.BackgroundColor3 = Color3.fromRGB(23, 27, 42)
+    scroll.BorderSizePixel = 0
+    scroll.ScrollBarThickness = 5
+    scroll.CanvasSize = UDim2.fromOffset(0, 0)
+    scroll.ZIndex = 31
+    scroll.Parent = viewer
+    local layout = Instance.new("UIListLayout", scroll)
+    layout.Padding = UDim.new(0, 3)
+    layout.SortOrder = Enum.SortOrder.LayoutOrder
+    local function addLog(kind, obj, detail)
+        local path = "-"
+        if obj then pcall(function() path = obj:GetFullName() end) end
+        local message = string.format("[%0.1fs] %s | %s | %s", os.clock(), kind, path, tostring(detail or ""))
+        table.insert(logs, message)
         if #logs > MAX_LOGS then table.remove(logs, 1) end
-        print("[MimicDiag] " .. line)
-    end
-    local function attach(obj)
-        if watched[obj] or not active then return end
-        if not (obj:IsA("ProximityPrompt") or obj:IsA("ClickDetector")) then return end
-        local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-        local part = obj.Parent
-        if root and part and part:IsA("BasePart") and (root.Position-part.Position).Magnitude > RANGE then return end
-        local signal = obj:IsA("ProximityPrompt") and obj.Triggered or obj.MouseClick
-        watched[obj] = signal:Connect(function()
-            log("INTERACT", obj, obj.ClassName)
+        revision += 1
+        local label = Instance.new("TextLabel")
+        label.BackgroundTransparency = 1
+        label.Size = UDim2.new(1, -10, 0, 0)
+        label.AutomaticSize = Enum.AutomaticSize.Y
+        label.TextWrapped = true
+        label.TextXAlignment = Enum.TextXAlignment.Left
+        label.TextYAlignment = Enum.TextYAlignment.Top
+        label.Font = Enum.Font.Code
+        label.TextSize = 11
+        label.TextColor3 = kind == "ERROR" and Color3.fromRGB(255, 135, 135) or Color3.fromRGB(205, 220, 245)
+        label.Text = message
+        label.ZIndex = 32
+        label.Parent = scroll
+        local children = {}
+        for _, child in ipairs(scroll:GetChildren()) do
+            if child:IsA("TextLabel") then table.insert(children, child) end
+        end
+        if #children > MAX_LOGS then children[1]:Destroy() end
+        task.defer(function()
+            scroll.CanvasSize = UDim2.fromOffset(0, layout.AbsoluteContentSize.Y + 8)
+            scroll.CanvasPosition = Vector2.new(0, math.max(0, layout.AbsoluteContentSize.Y - scroll.AbsoluteSize.Y + 8))
         end)
+        print("[MimicDiag] " .. message)
     end
-    local function stop()
-        active = false
+    local function button(label, x, width, callback)
+        local b = Instance.new("TextButton")
+        b.Size = UDim2.fromOffset(width, 32)
+        b.Position = UDim2.new(0, x, 1, -45)
+        b.Text = label
+        b.TextSize = 12
+        b.Font = Enum.Font.GothamBold
+        b.TextColor3 = Color3.new(1, 1, 1)
+        b.BackgroundColor3 = Color3.fromRGB(55, 68, 110)
+        b.ZIndex = 32
+        b.Parent = viewer
+        Instance.new("UICorner", b).CornerRadius = UDim.new(0, 7)
+        b.MouseButton1Click:Connect(callback)
+        return b
+    end
+    local function disconnectAll()
         for _, c in ipairs(connections) do c:Disconnect() end
         table.clear(connections)
-        for obj, c in pairs(watched) do c:Disconnect(); watched[obj] = nil end
-        if scanConn then task.cancel(scanConn); scanConn = nil end
-        log("STATUS", nil, "stopped")
+        for obj, c in pairs(watchedClicks) do c:Disconnect(); watchedClicks[obj] = nil end
+        table.clear(seenHumanoids)
     end
-    local function start()
-        if active then return end
-        active = true
-        table.insert(connections, Workspace.DescendantAdded:Connect(attach))
-        local backpack = player:FindFirstChildOfClass("Backpack")
-        local function toolWatch(obj)
-            if obj:IsA("Tool") then log("TOOL", obj, "observed") end
-        end
-        if backpack then table.insert(connections, backpack.ChildAdded:Connect(toolWatch)) end
-        scanConn = task.spawn(function()
-            while active do
-                local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-                if root then
-                    local count = 0
-                    for _, obj in ipairs(Workspace:GetPartBoundsInRadius(root.Position, RANGE)) do
-                        if count >= MAX_TARGETS then break end
-                        local model = obj:FindFirstAncestorOfClass("Model")
-                        if model and model ~= player.Character and model:FindFirstChildOfClass("Humanoid") and not watched[model] then
-                            count += 1
-                            log("HUMANOID", model, "nearby")
-                            watched[model] = true
-                        end
-                    end
-                    for obj, val in pairs(watched) do
-                        if val == true then watched[obj] = nil end
+    local function observeClick(obj)
+        if not enabled or not obj:IsA("ClickDetector") or watchedClicks[obj] then return end
+        watchedClicks[obj] = obj.MouseClick:Connect(function(who)
+            if who == player then addLog("CLICK", obj, "MouseClick") end
+        end)
+    end
+    local function scan()
+        local char = player.Character
+        local root = char and char:FindFirstChild("HumanoidRootPart")
+        if not root then return end
+        local ok, parts = pcall(function()
+            local params = OverlapParams.new()
+            params.FilterType = Enum.RaycastFilterType.Exclude
+            params.FilterDescendantsInstances = {char}
+            params.MaxParts = MAX_PARTS
+            return Workspace:GetPartBoundsInRadius(root.Position, RADIUS, params)
+        end)
+        if not ok then addLog("ERROR", nil, parts); return end
+        local current = {}
+        for _, part in ipairs(parts) do
+            local model = part:FindFirstAncestorOfClass("Model")
+            if model and model ~= char then
+                local hum = model:FindFirstChildOfClass("Humanoid")
+                if hum then
+                    current[model] = true
+                    if not seenHumanoids[model] then
+                        addLog("HUMANOID", model, string.format("HP %.0f/%.0f", hum.Health, hum.MaxHealth))
                     end
                 end
+            end
+            for _, obj in ipairs(part:GetDescendants()) do
+                if obj:IsA("ClickDetector") then observeClick(obj) end
+            end
+        end
+        seenHumanoids = current
+        for obj, conn in pairs(watchedClicks) do
+            if not obj.Parent then conn:Disconnect(); watchedClicks[obj] = nil end
+        end
+    end
+    local function start()
+        if enabled then return end
+        enabled = true
+        addLog("STATUS", nil, "Recording ON | radius 100 studs")
+        table.insert(connections, PromptService.PromptTriggered:Connect(function(prompt)
+            addLog("PROMPT", prompt, prompt.ActionText .. " / " .. prompt.ObjectText)
+        end))
+        table.insert(connections, PromptService.PromptShown:Connect(function(prompt)
+            addLog("PROMPT_VISIBLE", prompt, prompt.ActionText)
+        end))
+        table.insert(connections, Workspace.DescendantAdded:Connect(function(obj)
+            if obj:IsA("ClickDetector") then observeClick(obj) end
+        end))
+        local backpack = player:FindFirstChildOfClass("Backpack")
+        if backpack then
+            table.insert(connections, backpack.ChildAdded:Connect(function(obj)
+                if obj:IsA("Tool") then addLog("TOOL_ADDED", obj, obj.Name) end
+            end))
+        end
+        table.insert(connections, player.CharacterAdded:Connect(function(char)
+            addLog("RESPAWN", char, "CharacterAdded")
+        end))
+        task.spawn(function()
+            while enabled do
+                local ok, err = pcall(scan)
+                if not ok then addLog("ERROR", nil, err) end
                 task.wait(2)
             end
         end)
-        log("STATUS", nil, "started")
     end
-    -- Live on-screen log viewer
-    local viewer = Instance.new("Frame")
-    viewer.Name = "LiveLogViewer"
-    viewer.Size = UDim2.fromOffset(340, 270)
-    viewer.Position = UDim2.new(1, -350, 0, 80)
-    viewer.BackgroundColor3 = Color3.fromRGB(15, 17, 27)
-    viewer.Parent = screenGui
-    viewer.Active = true
-    Instance.new("UICorner", viewer).CornerRadius = UDim.new(0, 10)
-    local header = Instance.new("TextLabel")
-    header.Size = UDim2.new(1, -12, 0, 30)
-    header.Position = UDim2.fromOffset(6, 2)
-    header.BackgroundTransparency = 1
-    header.Text = "MIMIC LIVE LOGS"
-    header.TextColor3 = Color3.fromRGB(130, 180, 255)
-    header.TextSize = 14
-    header.Font = Enum.Font.GothamBold
-    header.Parent = viewer
-    local logScroll = Instance.new("ScrollingFrame")
-    logScroll.Size = UDim2.new(1, -12, 1, -80)
-    logScroll.Position = UDim2.fromOffset(6, 34)
-    logScroll.BackgroundColor3 = Color3.fromRGB(23, 25, 38)
-    logScroll.BorderSizePixel = 0
-    logScroll.ScrollBarThickness = 4
-    logScroll.CanvasSize = UDim2.fromOffset(0, 0)
-    logScroll.Parent = viewer
-    local logText = Instance.new("TextLabel")
-    logText.Size = UDim2.new(1, -10, 0, 20)
-    logText.Position = UDim2.fromOffset(5, 4)
-    logText.BackgroundTransparency = 1
-    logText.Text = "No logs yet. Press Start / Stop Log."
-    logText.TextColor3 = Color3.fromRGB(210, 220, 235)
-    logText.Font = Enum.Font.Code
-    logText.TextSize = 11
-    logText.TextXAlignment = Enum.TextXAlignment.Left
-    logText.TextYAlignment = Enum.TextYAlignment.Top
-    logText.TextWrapped = true
-    logText.Parent = logScroll
-    local clearBtn = Instance.new("TextButton")
-    clearBtn.Size = UDim2.fromOffset(100, 30)
-    clearBtn.Position = UDim2.new(0, 8, 1, -36)
-    clearBtn.BackgroundColor3 = Color3.fromRGB(60, 65, 95)
-    clearBtn.TextColor3 = Color3.new(1, 1, 1)
-    clearBtn.Text = "Clear Logs"
-    clearBtn.TextSize = 12
-    clearBtn.Parent = viewer
-    clearBtn.MouseButton1Click:Connect(function()
-        table.clear(logs)
-        logText.Text = "Logs cleared."
-    end)
-    local hideBtn = Instance.new("TextButton")
-    hideBtn.Size = UDim2.fromOffset(110, 30)
-    hideBtn.Position = UDim2.new(1, -118, 1, -36)
-    hideBtn.BackgroundColor3 = Color3.fromRGB(45, 65, 105)
-    hideBtn.TextColor3 = Color3.new(1, 1, 1)
-    hideBtn.Text = "Hide / Show"
-    hideBtn.TextSize = 12
-    hideBtn.Parent = viewer
-    hideBtn.MouseButton1Click:Connect(function()
-        logScroll.Visible = not logScroll.Visible
-    end)
-    local lastLogCount = -1
-    task.spawn(function()
-        while viewer.Parent do
-            if #logs ~= lastLogCount then
-                lastLogCount = #logs
-                logText.Text = #logs > 0 and table.concat(logs, "\\n") or "No logs yet."
-                local lines = math.max(1, #logs)
-                local height = math.max(20, lines * 42)
-                logText.Size = UDim2.new(1, -10, 0, height)
-                logScroll.CanvasSize = UDim2.fromOffset(0, height + 10)
-                logScroll.CanvasPosition = Vector2.new(0, math.max(0, height - logScroll.AbsoluteSize.Y))
-            end
-            task.wait(0.35)
+    local startBtn
+    startBtn = button("START", 7, 85, function()
+        if enabled then
+            enabled = false
+            disconnectAll()
+            addLog("STATUS", nil, "Recording OFF")
+            startBtn.Text = "START"
+        else
+            start()
+            startBtn.Text = "STOP"
         end
     end)
-    local diagnosticPanel = Instance.new("Frame")
-    diagnosticPanel.Name = "DiagnosticPanel"
-    diagnosticPanel.Size = UDim2.fromOffset(290, 120)
-    diagnosticPanel.Position = UDim2.new(0, 20, 0, 555)
-    diagnosticPanel.BackgroundColor3 = Color3.fromRGB(18, 18, 28)
-    diagnosticPanel.Parent = screenGui
-    Instance.new("UICorner", diagnosticPanel).CornerRadius = UDim.new(0, 10)
-    local function btn(label, x, callback)
-        local b = Instance.new("TextButton")
-        b.Size = UDim2.fromOffset(130, 34)
-        b.Position = UDim2.fromOffset(x, 12)
-        b.BackgroundColor3 = Color3.fromRGB(45, 55, 95)
-        b.TextColor3 = Color3.new(1,1,1)
-        b.TextSize = 12
-        b.Font = Enum.Font.GothamBold
-        b.Text = label
-        b.Parent = diagnosticPanel
-        Instance.new("UICorner", b).CornerRadius = UDim.new(0, 7)
-        b.MouseButton1Click:Connect(callback)
-    end
-    btn("Start / Stop Log", 8, function() if active then stop() else start() end end)
-    btn("Copy Logs", 150, function()
+    button("CLEAR", 98, 85, function()
+        table.clear(logs)
+        for _, obj in ipairs(scroll:GetChildren()) do
+            if obj:IsA("TextLabel") then obj:Destroy() end
+        end
+        scroll.CanvasSize = UDim2.fromOffset(0, 0)
+        addLog("STATUS", nil, "Logs cleared")
+    end)
+    button("COPY", 189, 110, function()
         local data = table.concat(logs, "\n")
         if type(setclipboard) == "function" then
-            setclipboard(data)
+            local ok, err = pcall(setclipboard, data)
+            if not ok then addLog("ERROR", nil, err) end
         else
+            addLog("STATUS", nil, "Clipboard unavailable; logs printed to console")
             print(data)
         end
     end)
-    local status = Instance.new("TextLabel")
-    status.Size = UDim2.new(1,-16,0,58)
-    status.Position = UDim2.fromOffset(8, 52)
-    status.BackgroundTransparency = 1
-    status.TextColor3 = Color3.fromRGB(160,210,255)
-    status.TextWrapped = true
-    status.TextSize = 12
-    status.Text = "Diagnostic ready | 100 studs | 2s interval"
-    status.Parent = diagnosticPanel
-    task.spawn(function()
-        while diagnosticPanel.Parent do
-            status.Text = string.format("Logger: %s | Logs: %d/%d\nHumanoid radius: %d studs | Scan: 2s", active and "ON" or "OFF", #logs, MAX_LOGS, RANGE)
-            task.wait(1)
-        end
-    end)
+    addLog("READY", nil, "Viewer loaded; press START to capture events")
 end
