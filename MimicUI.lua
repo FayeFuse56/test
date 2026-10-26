@@ -995,3 +995,116 @@ setBrightness(DEFAULT_BRIGHTNESS)
 if humanoid then humanoid.WalkSpeed = DEFAULT_SPEED end
 
 print("[MimicUI v2] โหลดสำเร็จ ✓")
+
+
+-- ============================================
+-- Diagnostic v3: bounded client-side logger
+-- ============================================
+do
+    local MAX_LOGS, RANGE, MAX_TARGETS = 160, 100, 24
+    local logs, watched, active = {}, {}, false
+    local connections = {}
+    local scanConn
+    local function log(kind, obj, detail)
+        local path = obj and obj:GetFullName() or "-"
+        local line = string.format("[%.1f] %s | %s | %s", os.clock(), kind, path, tostring(detail or ""))
+        table.insert(logs, line)
+        if #logs > MAX_LOGS then table.remove(logs, 1) end
+        print("[MimicDiag] " .. line)
+    end
+    local function attach(obj)
+        if watched[obj] or not active then return end
+        if not (obj:IsA("ProximityPrompt") or obj:IsA("ClickDetector")) then return end
+        local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+        local part = obj.Parent
+        if root and part and part:IsA("BasePart") and (root.Position-part.Position).Magnitude > RANGE then return end
+        local signal = obj:IsA("ProximityPrompt") and obj.Triggered or obj.MouseClick
+        watched[obj] = signal:Connect(function()
+            log("INTERACT", obj, obj.ClassName)
+        end)
+    end
+    local function stop()
+        active = false
+        for _, c in ipairs(connections) do c:Disconnect() end
+        table.clear(connections)
+        for obj, c in pairs(watched) do c:Disconnect(); watched[obj] = nil end
+        if scanConn then task.cancel(scanConn); scanConn = nil end
+        log("STATUS", nil, "stopped")
+    end
+    local function start()
+        if active then return end
+        active = true
+        table.insert(connections, Workspace.DescendantAdded:Connect(attach))
+        local backpack = player:FindFirstChildOfClass("Backpack")
+        local function toolWatch(obj)
+            if obj:IsA("Tool") then log("TOOL", obj, "observed") end
+        end
+        if backpack then table.insert(connections, backpack.ChildAdded:Connect(toolWatch)) end
+        scanConn = task.spawn(function()
+            while active do
+                local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+                if root then
+                    local count = 0
+                    for _, obj in ipairs(Workspace:GetPartBoundsInRadius(root.Position, RANGE)) do
+                        if count >= MAX_TARGETS then break end
+                        local model = obj:FindFirstAncestorOfClass("Model")
+                        if model and model ~= player.Character and model:FindFirstChildOfClass("Humanoid") and not watched[model] then
+                            count += 1
+                            log("HUMANOID", model, "nearby")
+                            watched[model] = true
+                        end
+                    end
+                    for obj, val in pairs(watched) do
+                        if val == true then watched[obj] = nil end
+                    end
+                end
+                task.wait(2)
+            end
+        end)
+        log("STATUS", nil, "started")
+    end
+    local diagnosticPanel = Instance.new("Frame")
+    diagnosticPanel.Name = "DiagnosticPanel"
+    diagnosticPanel.Size = UDim2.fromOffset(290, 120)
+    diagnosticPanel.Position = UDim2.new(0, 20, 0, 555)
+    diagnosticPanel.BackgroundColor3 = Color3.fromRGB(18, 18, 28)
+    diagnosticPanel.Parent = screenGui
+    Instance.new("UICorner", diagnosticPanel).CornerRadius = UDim.new(0, 10)
+    local function btn(label, x, callback)
+        local b = Instance.new("TextButton")
+        b.Size = UDim2.fromOffset(130, 34)
+        b.Position = UDim2.fromOffset(x, 12)
+        b.BackgroundColor3 = Color3.fromRGB(45, 55, 95)
+        b.TextColor3 = Color3.new(1,1,1)
+        b.TextSize = 12
+        b.Font = Enum.Font.GothamBold
+        b.Text = label
+        b.Parent = diagnosticPanel
+        Instance.new("UICorner", b).CornerRadius = UDim.new(0, 7)
+        b.MouseButton1Click:Connect(callback)
+    end
+    btn("Start / Stop Log", 8, function() if active then stop() else start() end end)
+    btn("Copy Logs", 150, function()
+        local data = table.concat(logs, "\n")
+        if type(setclipboard) == "function" then
+            setclipboard(data)
+        else
+            print(data)
+        end
+    end)
+    local status = Instance.new("TextLabel")
+    status.Size = UDim2.new(1,-16,0,58)
+    status.Position = UDim2.fromOffset(8, 52)
+    status.BackgroundTransparency = 1
+    status.TextColor3 = Color3.fromRGB(160,210,255)
+    status.TextWrapped = true
+    status.TextSize = 12
+    status.Text = "Diagnostic ready | 100 studs | 2s interval"
+    status.Parent = diagnosticPanel
+    task.spawn(function()
+        while diagnosticPanel.Parent do
+            status.Text = string.format("Logger: %s | Logs: %d/%d\nHumanoid radius: %d studs | Scan: 2s", active and "ON" or "OFF", #logs, MAX_LOGS, RANGE)
+            task.wait(1)
+        end
+    end)
+end
