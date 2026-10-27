@@ -273,88 +273,89 @@ UserInputService.InputEnded:Connect(function(input)
 end)
 
 -- ============================================
--- Hitbox ESP — ทุก Model ที่มี Humanoid
+-- Lightweight moving-target ESP (Humanoid + dynamic parts)
 -- ============================================
-local hitboxEnabled    = false
-local hitboxHighlights = {}
-
+local hitboxEnabled = false
+local moveEspEnabled = false
+local trackedModels = {}
+local trackedParts = {}
+local espTimer = 0
+local ESP_RANGE = 140
+local ESP_MAX = 45
+local ESP_INTERVAL = 0.65
+local function espRoot()
+    return character and character:FindFirstChild("HumanoidRootPart")
+end
+local function clearVisuals(registry)
+    for obj, visual in pairs(registry) do
+        visual:Destroy()
+        registry[obj] = nil
+    end
+end
 local function clearHitbox()
-	for obj, h in pairs(hitboxHighlights) do
-		h:Destroy(); hitboxHighlights[obj] = nil
-	end
+    clearVisuals(trackedModels)
+    clearVisuals(trackedParts)
 end
-
+local function makeHighlight(target, color)
+    local h = Instance.new("Highlight")
+    h.Name = "FayMovingESP"
+    h.Adornee = target
+    h.FillColor = color
+    h.OutlineColor = color
+    h.FillTransparency = 0.85
+    h.OutlineTransparency = 0
+    h.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    h.Parent = screenGui
+    return h
+end
 local function refreshHitbox()
-	clearHitbox()
-	if not hitboxEnabled then return end
-	for _, obj in ipairs(Workspace:GetDescendants()) do
-		if obj:IsA("Model") then
-			local hum = obj:FindFirstChildOfClass("Humanoid")
-			-- ข้ามตัวละครของผู้เล่นเอง
-			if hum and obj ~= character then
-				local isPlayer = false
-				for _, p in ipairs(Players:GetPlayers()) do
-					if p.Character == obj then isPlayer = true; break end
-				end
-				-- สีต่างกัน: เขียว = player อื่น, ส้ม = NPC/monster
-				local col = isPlayer
-					and Color3.fromRGB(0, 255, 100)
-					or  Color3.fromRGB(255, 140, 0)
-
-				local h = Instance.new("SelectionBox")
-				h.Adornee             = obj
-				h.Color3              = col
-				h.LineThickness       = 0.04
-				h.SurfaceTransparency = 0.9
-				h.SurfaceColor3       = col
-				h.Parent              = Workspace
-				hitboxHighlights[obj] = h
-
-				-- แสดง HP บน HumanoidRootPart
-				local root = obj:FindFirstChild("HumanoidRootPart")
-				if root then
-					local bb = Instance.new("BillboardGui")
-					bb.Name          = "HitboxLabel"
-					bb.Adornee       = root
-					bb.Size          = UDim2.new(0, 80, 0, 28)
-					bb.StudsOffset   = Vector3.new(0, 3, 0)
-					bb.AlwaysOnTop   = true
-					bb.Parent        = Workspace
-
-					local lbl = Instance.new("TextLabel", bb)
-					lbl.Size                = UDim2.new(1, 0, 1, 0)
-					lbl.BackgroundTransparency = 1
-					lbl.TextColor3          = col
-					lbl.Font                = Enum.Font.GothamBold
-					lbl.TextSize            = 14
-					lbl.TextStrokeTransparency = 0
-					lbl.TextStrokeColor3    = Color3.fromRGB(0,0,0)
-
-					-- อัปเดต HP label ทุก 2 วิ (ลดภาระการคำนวน)
-					local hpTimer = 0
-					RunService.Heartbeat:Connect(function(dt)
-						if not hitboxEnabled or not hum or not hum.Parent then
-							bb:Destroy(); return
-						end
-						hpTimer += dt
-						if hpTimer >= 2 then
-							hpTimer = 0
-							lbl.Text = string.format("❤ %d/%d", math.floor(hum.Health), math.floor(hum.MaxHealth))
-						end
-					end)
-
-					hitboxHighlights[obj .. "_bb"] = bb
-				end
-			end
-		end
-	end
+    local root = espRoot()
+    if not root then clearHitbox(); return end
+    local activeModels, activeParts = {}, {}
+    local params = OverlapParams.new()
+    params.FilterType = Enum.RaycastFilterType.Exclude
+    params.FilterDescendantsInstances = {character}
+    params.MaxParts = 250
+    local nearby = Workspace:GetPartBoundsInRadius(root.Position, ESP_RANGE, params)
+    local count = 0
+    for _, part in ipairs(nearby) do
+        if count >= ESP_MAX then break end
+        local model = part:FindFirstAncestorOfClass("Model")
+        local hum = model and model:FindFirstChildOfClass("Humanoid")
+        if hitboxEnabled and hum and model ~= character and hum.Health > 0 then
+            if not activeModels[model] then
+                activeModels[model] = true
+                if not trackedModels[model] then
+                    local isPlayer = Players:GetPlayerFromCharacter(model) ~= nil
+                    trackedModels[model] = makeHighlight(model, isPlayer and Color3.fromRGB(50,255,120) or Color3.fromRGB(255,145,50))
+                end
+                count += 1
+            end
+        elseif moveEspEnabled and not hum and not part.Anchored and part.AssemblyLinearVelocity.Magnitude > 1.5 then
+            local target = part.AssemblyRootPart or part
+            if not activeParts[target] and not target:IsDescendantOf(character) then
+                activeParts[target] = true
+                if not trackedParts[target] then
+                    trackedParts[target] = makeHighlight(target, Color3.fromRGB(90,195,255))
+                end
+                count += 1
+            end
+        end
+    end
+    for model, h in pairs(trackedModels) do
+        if not activeModels[model] then h:Destroy(); trackedModels[model] = nil end
+    end
+    for part, h in pairs(trackedParts) do
+        if not activeParts[part] then h:Destroy(); trackedParts[part] = nil end
+    end
 end
-
-local hitboxTimer = 0
 RunService.Heartbeat:Connect(function(dt)
-	if not hitboxEnabled then return end
-	hitboxTimer += dt
-	if hitboxTimer >= 3 then hitboxTimer = 0; refreshHitbox() end
+    if not hitboxEnabled and not moveEspEnabled then return end
+    espTimer += dt
+    if espTimer >= ESP_INTERVAL then
+        espTimer = 0
+        refreshHitbox()
+    end
 end)
 
 -- ============================================
@@ -485,6 +486,61 @@ end
 -- (Item Highlight ถูกลบออกแล้ว — ใช้งานไม่ดี)
 
 -- ============================================
+-- Fog remover (reversible, client-side)
+-- ============================================
+local fogEnabled = false
+local fogBackup = nil
+local fogConn = nil
+local function applyNoFog()
+    Lighting.FogStart = 0
+    Lighting.FogEnd = 1000000
+    for _, obj in ipairs(Lighting:GetChildren()) do
+        if obj:IsA("Atmosphere") then
+            obj.Density = 0
+            obj.Haze = 0
+            obj.Glare = 0
+        end
+    end
+end
+local function setNoFog(on)
+    fogEnabled = on
+    if on then
+        fogBackup = {start = Lighting.FogStart, finish = Lighting.FogEnd, atmosphere = {}}
+        for _, obj in ipairs(Lighting:GetChildren()) do
+            if obj:IsA("Atmosphere") then
+                fogBackup.atmosphere[obj] = {density = obj.Density, haze = obj.Haze, glare = obj.Glare}
+            end
+        end
+        applyNoFog()
+        if fogConn then fogConn:Disconnect() end
+        fogConn = Lighting.ChildAdded:Connect(function(obj)
+            if obj:IsA("Atmosphere") then
+                task.defer(function()
+                    if fogEnabled and obj.Parent then
+                        fogBackup.atmosphere[obj] = {density = obj.Density, haze = obj.Haze, glare = obj.Glare}
+                        applyNoFog()
+                    end
+                end)
+            end
+        end)
+    else
+        if fogConn then fogConn:Disconnect(); fogConn = nil end
+        if fogBackup then
+            Lighting.FogStart = fogBackup.start
+            Lighting.FogEnd = fogBackup.finish
+            for obj, values in pairs(fogBackup.atmosphere) do
+                if obj.Parent then
+                    obj.Density = values.density
+                    obj.Haze = values.haze
+                    obj.Glare = values.glare
+                end
+            end
+        end
+        fogBackup = nil
+    end
+end
+
+-- ============================================
 -- ScreenGui
 -- ============================================
 local screenGui = Instance.new("ScreenGui")
@@ -492,82 +548,6 @@ screenGui.Name = "MimicUI"
 screenGui.ResetOnSpawn = false
 screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 screenGui.Parent = player.PlayerGui
-
--- ============================================
--- Position Display
--- ============================================
-local inspectFrame = Instance.new("Frame")
-inspectFrame.Name = "PositionPanel"
-inspectFrame.Size = UDim2.new(0,220,0,72)
-inspectFrame.Position = UDim2.new(0,10,0,300)
-inspectFrame.BackgroundColor3 = Color3.fromRGB(14,14,22)
-inspectFrame.BorderSizePixel = 0
-inspectFrame.ZIndex = 12
-inspectFrame.Parent = screenGui
-Instance.new("UICorner",inspectFrame).CornerRadius = UDim.new(0,10)
-local inspStroke = Instance.new("UIStroke",inspectFrame)
-inspStroke.Color = Color3.fromRGB(80,180,100); inspStroke.Thickness = 1.5
-
--- Title bar (ใช้ลาก)
-local inspTitle = Instance.new("TextLabel",inspectFrame)
-inspTitle.Name = "TitleBar"
-inspTitle.Size = UDim2.new(1,0,0,24); inspTitle.Position = UDim2.new(0,0,0,0)
-inspTitle.BackgroundColor3 = Color3.fromRGB(20,40,20)
-inspTitle.Text = "📍 Position"
-inspTitle.TextColor3 = Color3.fromRGB(100,255,100)
-inspTitle.Font = Enum.Font.GothamBold; inspTitle.TextSize = 12; inspTitle.ZIndex = 13
-Instance.new("UICorner",inspTitle).CornerRadius = UDim.new(0,10)
-
-local posLbl = Instance.new("TextLabel",inspectFrame)
-posLbl.Size = UDim2.new(1,-8,0,40); posLbl.Position = UDim2.new(0,4,0,28)
-posLbl.BackgroundTransparency = 1
-posLbl.Text = "X: 0  Y: 0  Z: 0"
-posLbl.TextColor3 = Color3.fromRGB(200,220,255)
-posLbl.Font = Enum.Font.Gotham; posLbl.TextSize = 13; posLbl.ZIndex = 13
-posLbl.TextXAlignment = Enum.TextXAlignment.Left
-posLbl.TextWrapped = true
-
--- Drag logic
-local draggingInsp = false
-local dragStartInsp, startPosInsp
-
-inspTitle.InputBegan:Connect(function(input)
-	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-		draggingInsp = true
-		dragStartInsp = input.Position
-		startPosInsp = inspectFrame.Position
-	end
-end)
-
-UserInputService.InputChanged:Connect(function(input)
-	if draggingInsp and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-		local delta = input.Position - dragStartInsp
-		inspectFrame.Position = UDim2.new(
-			startPosInsp.X.Scale, startPosInsp.X.Offset + delta.X,
-			startPosInsp.Y.Scale, startPosInsp.Y.Offset + delta.Y
-		)
-	end
-end)
-
-UserInputService.InputEnded:Connect(function(input)
-	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-		draggingInsp = false
-	end
-end)
-
--- อัปเดต position ทุก 2 วิ (ลดภาระการคำนวน)
-local posTimer = 0
-RunService.Heartbeat:Connect(function(dt)
-	posTimer += dt
-	if posTimer >= 2 then
-		posTimer = 0
-		local root = character and character:FindFirstChild("HumanoidRootPart")
-		if root then
-			local p = root.Position
-			posLbl.Text = string.format("X: %.1f  Y: %.1f  Z: %.1f", p.X, p.Y, p.Z)
-		end
-	end
-end)
 
 -- ปุ่ม ⬆ ขึ้น/กระโดด (ซ้ายบน)
 local floatUp = Instance.new("TextButton")
@@ -695,7 +675,7 @@ scroll.BackgroundTransparency = 1
 scroll.BorderSizePixel = 0
 scroll.ScrollBarThickness = 4
 scroll.ScrollBarImageColor3 = Color3.fromRGB(80,100,220)
-scroll.CanvasSize = UDim2.new(0,0,0,460)  -- ความสูงเนื้อหาทั้งหมด
+scroll.CanvasSize = UDim2.new(0,0,0,590)  -- ความสูงเนื้อหาทั้งหมด
 scroll.ScrollingDirection = Enum.ScrollingDirection.Y
 scroll.ZIndex = 6
 scroll.Parent = panel
@@ -917,9 +897,9 @@ createToggleButton(scroll, "God Mode", "🛡", 217, function(state)
 	if state then enableGodMode() else disableGodMode() end
 end)
 
-createToggleButton(scroll, "Hitbox ESP", "📦", 259, function(state)
+createToggleButton(scroll, "Humanoid ESP", "📦", 259, function(state)
 	hitboxEnabled = state
-	if state then refreshHitbox() else clearHitbox() end
+	if state then refreshHitbox() else if not moveEspEnabled then clearHitbox() end end
 end)
 
 createToggleButton(scroll, "X-Ray (ทะลุพื้น)", "🔍", 301, function(state)
@@ -937,14 +917,24 @@ createToggleButton(scroll, "Set HP 100", "❤", 385, function(state)
 	if state then enableHPBoost() else disableHPBoost() end
 end)
 
+
+createToggleButton(scroll, "Moving Object ESP", "🎯", 427, function(state)
+    moveEspEnabled = state
+    if state then refreshHitbox() elseif not hitboxEnabled then clearHitbox() else refreshHitbox() end
+end)
+
+createToggleButton(scroll, "Remove Fog", "☁", 469, function(state)
+    setNoFog(state)
+end)
+
 local divider2 = Instance.new("Frame", scroll)
-divider2.Size = UDim2.new(1,-24,0,1); divider2.Position = UDim2.new(0,12,0,392)
+divider2.Size = UDim2.new(1,-24,0,1); divider2.Position = UDim2.new(0,12,0,514)
 divider2.BackgroundColor3 = Color3.fromRGB(50,55,90); divider2.BorderSizePixel = 0; divider2.ZIndex = 6
 
 local hint = Instance.new("TextLabel", scroll)
-hint.Size = UDim2.new(1,-24,0,60); hint.Position = UDim2.new(0,12,0,398)
+hint.Size = UDim2.new(1,-24,0,60); hint.Position = UDim2.new(0,12,0,522)
 hint.BackgroundTransparency = 1
-hint.Text = "🔍 X-Ray = มองทะลุพื้น/กำแพง\n📍 Position แสดงในกล่อง Inspector\n⬆⬇ มุมขวาบน: กระโดด/บิน"
+hint.Text = "ESP: orange NPC, green player, blue moving parts\nRemove Fog: clears local fog/atmosphere\nUp/Down buttons: jump / fly"
 hint.TextColor3 = Color3.fromRGB(90,100,140)
 hint.Font = Enum.Font.Gotham; hint.TextSize = 10
 hint.TextWrapped = true; hint.ZIndex = 7
@@ -995,225 +985,3 @@ setBrightness(DEFAULT_BRIGHTNESS)
 if humanoid then humanoid.WalkSpeed = DEFAULT_SPEED end
 
 print("[MimicUI v2] โหลดสำเร็จ ✓")
-
-
--- ============================================
--- Mimic Diagnostic v3.2 — live, draggable, bounded
--- ============================================
-do
-    local PromptService = game:GetService("ProximityPromptService")
-    local MAX_LOGS, RADIUS, MAX_PARTS = 180, 100, 150
-    local logs, seenHumanoids, watchedClicks = {}, {}, {}
-    local enabled = false
-    local connections = {}
-    local revision = 0
-    local viewer = Instance.new("Frame")
-    viewer.Name = "LiveLogViewer"
-    viewer.Size = UDim2.fromOffset(310, 310)
-    viewer.Position = UDim2.new(0.5, -155, 0.25, 0)
-    viewer.BackgroundColor3 = Color3.fromRGB(17, 20, 32)
-    viewer.BorderSizePixel = 0
-    viewer.Active = true
-    viewer.ZIndex = 30
-    viewer.Parent = screenGui
-    Instance.new("UICorner", viewer).CornerRadius = UDim.new(0, 10)
-    local stroke = Instance.new("UIStroke", viewer)
-    stroke.Color = Color3.fromRGB(95, 130, 235)
-    local bar = Instance.new("TextButton")
-    bar.Name = "DragHandle"
-    bar.Text = "≡  MIMIC DIAGNOSTIC  •  drag here"
-    bar.Font = Enum.Font.GothamBold
-    bar.TextSize = 12
-    bar.TextColor3 = Color3.fromRGB(210, 225, 255)
-    bar.BackgroundColor3 = Color3.fromRGB(35, 43, 72)
-    bar.Size = UDim2.new(1, 0, 0, 36)
-    bar.ZIndex = 31
-    bar.Parent = viewer
-    Instance.new("UICorner", bar).CornerRadius = UDim.new(0, 10)
-    local dragging, dragStart, startPos, dragInput
-    bar.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
-            dragging = true
-            dragStart = input.Position
-            startPos = viewer.Position
-            dragInput = input
-        end
-    end)
-    UserInputService.InputChanged:Connect(function(input)
-        if not dragging then return end
-        if input.UserInputType == Enum.UserInputType.MouseMovement or input == dragInput then
-            local delta = input.Position - dragStart
-            viewer.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
-        end
-    end)
-    UserInputService.InputEnded:Connect(function(input)
-        if input == dragInput or (dragInput and dragInput.UserInputType == Enum.UserInputType.MouseButton1 and input.UserInputType == Enum.UserInputType.MouseButton1) then
-            dragging = false
-        end
-    end)
-    local scroll = Instance.new("ScrollingFrame")
-    scroll.Name = "Events"
-    scroll.Position = UDim2.fromOffset(7, 42)
-    scroll.Size = UDim2.new(1, -14, 1, -96)
-    scroll.BackgroundColor3 = Color3.fromRGB(23, 27, 42)
-    scroll.BorderSizePixel = 0
-    scroll.ScrollBarThickness = 5
-    scroll.CanvasSize = UDim2.fromOffset(0, 0)
-    scroll.ZIndex = 31
-    scroll.Parent = viewer
-    local layout = Instance.new("UIListLayout", scroll)
-    layout.Padding = UDim.new(0, 3)
-    layout.SortOrder = Enum.SortOrder.LayoutOrder
-    local function addLog(kind, obj, detail)
-        local path = "-"
-        if obj then pcall(function() path = obj:GetFullName() end) end
-        local message = string.format("[%0.1fs] %s | %s | %s", os.clock(), kind, path, tostring(detail or ""))
-        table.insert(logs, message)
-        if #logs > MAX_LOGS then table.remove(logs, 1) end
-        revision += 1
-        local label = Instance.new("TextLabel")
-        label.BackgroundTransparency = 1
-        label.Size = UDim2.new(1, -10, 0, 0)
-        label.AutomaticSize = Enum.AutomaticSize.Y
-        label.TextWrapped = true
-        label.TextXAlignment = Enum.TextXAlignment.Left
-        label.TextYAlignment = Enum.TextYAlignment.Top
-        label.Font = Enum.Font.Code
-        label.TextSize = 11
-        label.TextColor3 = kind == "ERROR" and Color3.fromRGB(255, 135, 135) or Color3.fromRGB(205, 220, 245)
-        label.Text = message
-        label.ZIndex = 32
-        label.Parent = scroll
-        local children = {}
-        for _, child in ipairs(scroll:GetChildren()) do
-            if child:IsA("TextLabel") then table.insert(children, child) end
-        end
-        if #children > MAX_LOGS then children[1]:Destroy() end
-        task.defer(function()
-            scroll.CanvasSize = UDim2.fromOffset(0, layout.AbsoluteContentSize.Y + 8)
-            scroll.CanvasPosition = Vector2.new(0, math.max(0, layout.AbsoluteContentSize.Y - scroll.AbsoluteSize.Y + 8))
-        end)
-        print("[MimicDiag] " .. message)
-    end
-    local function button(label, x, width, callback)
-        local b = Instance.new("TextButton")
-        b.Size = UDim2.fromOffset(width, 32)
-        b.Position = UDim2.new(0, x, 1, -45)
-        b.Text = label
-        b.TextSize = 12
-        b.Font = Enum.Font.GothamBold
-        b.TextColor3 = Color3.new(1, 1, 1)
-        b.BackgroundColor3 = Color3.fromRGB(55, 68, 110)
-        b.ZIndex = 32
-        b.Parent = viewer
-        Instance.new("UICorner", b).CornerRadius = UDim.new(0, 7)
-        b.MouseButton1Click:Connect(callback)
-        return b
-    end
-    local function disconnectAll()
-        for _, c in ipairs(connections) do c:Disconnect() end
-        table.clear(connections)
-        for obj, c in pairs(watchedClicks) do c:Disconnect(); watchedClicks[obj] = nil end
-        table.clear(seenHumanoids)
-    end
-    local function observeClick(obj)
-        if not enabled or not obj:IsA("ClickDetector") or watchedClicks[obj] then return end
-        watchedClicks[obj] = obj.MouseClick:Connect(function(who)
-            if who == player then addLog("CLICK", obj, "MouseClick") end
-        end)
-    end
-    local function scan()
-        local char = player.Character
-        local root = char and char:FindFirstChild("HumanoidRootPart")
-        if not root then return end
-        local ok, parts = pcall(function()
-            local params = OverlapParams.new()
-            params.FilterType = Enum.RaycastFilterType.Exclude
-            params.FilterDescendantsInstances = {char}
-            params.MaxParts = MAX_PARTS
-            return Workspace:GetPartBoundsInRadius(root.Position, RADIUS, params)
-        end)
-        if not ok then addLog("ERROR", nil, parts); return end
-        local current = {}
-        for _, part in ipairs(parts) do
-            local model = part:FindFirstAncestorOfClass("Model")
-            if model and model ~= char then
-                local hum = model:FindFirstChildOfClass("Humanoid")
-                if hum then
-                    current[model] = true
-                    if not seenHumanoids[model] then
-                        addLog("HUMANOID", model, string.format("HP %.0f/%.0f", hum.Health, hum.MaxHealth))
-                    end
-                end
-            end
-            for _, obj in ipairs(part:GetDescendants()) do
-                if obj:IsA("ClickDetector") then observeClick(obj) end
-            end
-        end
-        seenHumanoids = current
-        for obj, conn in pairs(watchedClicks) do
-            if not obj.Parent then conn:Disconnect(); watchedClicks[obj] = nil end
-        end
-    end
-    local function start()
-        if enabled then return end
-        enabled = true
-        addLog("STATUS", nil, "Recording ON | radius 100 studs")
-        table.insert(connections, PromptService.PromptTriggered:Connect(function(prompt)
-            addLog("PROMPT", prompt, prompt.ActionText .. " / " .. prompt.ObjectText)
-        end))
-        table.insert(connections, PromptService.PromptShown:Connect(function(prompt)
-            addLog("PROMPT_VISIBLE", prompt, prompt.ActionText)
-        end))
-        table.insert(connections, Workspace.DescendantAdded:Connect(function(obj)
-            if obj:IsA("ClickDetector") then observeClick(obj) end
-        end))
-        local backpack = player:FindFirstChildOfClass("Backpack")
-        if backpack then
-            table.insert(connections, backpack.ChildAdded:Connect(function(obj)
-                if obj:IsA("Tool") then addLog("TOOL_ADDED", obj, obj.Name) end
-            end))
-        end
-        table.insert(connections, player.CharacterAdded:Connect(function(char)
-            addLog("RESPAWN", char, "CharacterAdded")
-        end))
-        task.spawn(function()
-            while enabled do
-                local ok, err = pcall(scan)
-                if not ok then addLog("ERROR", nil, err) end
-                task.wait(2)
-            end
-        end)
-    end
-    local startBtn
-    startBtn = button("START", 7, 85, function()
-        if enabled then
-            enabled = false
-            disconnectAll()
-            addLog("STATUS", nil, "Recording OFF")
-            startBtn.Text = "START"
-        else
-            start()
-            startBtn.Text = "STOP"
-        end
-    end)
-    button("CLEAR", 98, 85, function()
-        table.clear(logs)
-        for _, obj in ipairs(scroll:GetChildren()) do
-            if obj:IsA("TextLabel") then obj:Destroy() end
-        end
-        scroll.CanvasSize = UDim2.fromOffset(0, 0)
-        addLog("STATUS", nil, "Logs cleared")
-    end)
-    button("COPY", 189, 110, function()
-        local data = table.concat(logs, "\n")
-        if type(setclipboard) == "function" then
-            local ok, err = pcall(setclipboard, data)
-            if not ok then addLog("ERROR", nil, err) end
-        else
-            addLog("STATUS", nil, "Clipboard unavailable; logs printed to console")
-            print(data)
-        end
-    end)
-    addLog("READY", nil, "Viewer loaded; press START to capture events")
-end
