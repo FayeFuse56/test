@@ -549,6 +549,223 @@ screenGui.ResetOnSpawn = false
 screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 screenGui.Parent = player.PlayerGui
 
+-- ============================================
+-- Fay Runtime Inspector — client-visible activity log
+-- ============================================
+local runtimeEnabled = false
+local runtimeConnections = {}
+local runtimeWatched = {}
+local runtimeLogs = {}
+local RUNTIME_MAX_LOGS = 80
+local RUNTIME_MAX_WATCHED = 1800
+
+local runtimePanel = Instance.new("Frame")
+runtimePanel.Name = "FayRuntimeInspector"
+runtimePanel.Size = UDim2.new(0, 285, 0, 220)
+runtimePanel.Position = UDim2.new(1, -295, 1, -230)
+runtimePanel.BackgroundColor3 = Color3.fromRGB(16, 18, 29)
+runtimePanel.BorderSizePixel = 0
+runtimePanel.Visible = false
+runtimePanel.ZIndex = 20
+runtimePanel.Parent = screenGui
+Instance.new("UICorner", runtimePanel).CornerRadius = UDim.new(0, 10)
+local runtimeStroke = Instance.new("UIStroke", runtimePanel)
+runtimeStroke.Color = Color3.fromRGB(80, 110, 220)
+runtimeStroke.Thickness = 1.3
+
+local runtimeHeader = Instance.new("Frame", runtimePanel)
+runtimeHeader.Size = UDim2.new(1, 0, 0, 30)
+runtimeHeader.BackgroundColor3 = Color3.fromRGB(30, 36, 62)
+runtimeHeader.BorderSizePixel = 0
+runtimeHeader.ZIndex = 21
+Instance.new("UICorner", runtimeHeader).CornerRadius = UDim.new(0, 10)
+local runtimeTitle = Instance.new("TextLabel", runtimeHeader)
+runtimeTitle.Size = UDim2.new(1, -95, 1, 0)
+runtimeTitle.Position = UDim2.new(0, 9, 0, 0)
+runtimeTitle.BackgroundTransparency = 1
+runtimeTitle.Text = "Fay Runtime Inspector"
+runtimeTitle.TextColor3 = Color3.fromRGB(215, 225, 255)
+runtimeTitle.Font = Enum.Font.GothamBold
+runtimeTitle.TextSize = 11
+runtimeTitle.TextXAlignment = Enum.TextXAlignment.Left
+runtimeTitle.ZIndex = 22
+
+local function runtimeButton(text, x, width)
+    local b = Instance.new("TextButton", runtimeHeader)
+    b.Size = UDim2.new(0, width, 0, 21)
+    b.Position = UDim2.new(1, x, 0, 4)
+    b.BackgroundColor3 = Color3.fromRGB(55, 65, 100)
+    b.TextColor3 = Color3.fromRGB(240, 240, 255)
+    b.Text = text
+    b.Font = Enum.Font.GothamBold
+    b.TextSize = 10
+    b.BorderSizePixel = 0
+    b.ZIndex = 23
+    Instance.new("UICorner", b).CornerRadius = UDim.new(0, 5)
+    return b
+end
+local runtimeClear = runtimeButton("CLEAR", -82, 38)
+local runtimeClose = runtimeButton("×", -38, 28)
+
+local runtimeScroll = Instance.new("ScrollingFrame", runtimePanel)
+runtimeScroll.Position = UDim2.new(0, 6, 0, 35)
+runtimeScroll.Size = UDim2.new(1, -12, 1, -41)
+runtimeScroll.BackgroundColor3 = Color3.fromRGB(10, 12, 20)
+runtimeScroll.BackgroundTransparency = 0.15
+runtimeScroll.BorderSizePixel = 0
+runtimeScroll.ScrollBarThickness = 3
+runtimeScroll.ScrollBarImageColor3 = Color3.fromRGB(90, 115, 210)
+runtimeScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+runtimeScroll.ZIndex = 21
+Instance.new("UICorner", runtimeScroll).CornerRadius = UDim.new(0, 6)
+
+local runtimeText = Instance.new("TextLabel", runtimeScroll)
+runtimeText.Position = UDim2.new(0, 5, 0, 4)
+runtimeText.Size = UDim2.new(1, -10, 0, 20)
+runtimeText.BackgroundTransparency = 1
+runtimeText.Text = "Runtime Monitor พร้อมทำงาน"
+runtimeText.TextColor3 = Color3.fromRGB(175, 195, 235)
+runtimeText.Font = Enum.Font.Code
+runtimeText.TextSize = 10
+runtimeText.TextXAlignment = Enum.TextXAlignment.Left
+runtimeText.TextYAlignment = Enum.TextYAlignment.Top
+runtimeText.TextWrapped = true
+runtimeText.ZIndex = 22
+
+local function runtimePath(obj)
+    local ok, result = pcall(function() return obj:GetFullName() end)
+    return ok and result or obj.Name
+end
+
+local function runtimeLog(message)
+    local stamp = os.date("%H:%M:%S")
+    table.insert(runtimeLogs, "[" .. stamp .. "] " .. tostring(message))
+    while #runtimeLogs > RUNTIME_MAX_LOGS do
+        table.remove(runtimeLogs, 1)
+    end
+    runtimeText.Text = table.concat(runtimeLogs, "\n")
+    local lineCount = #runtimeLogs
+    local height = math.max(20, lineCount * 14 + 8)
+    runtimeText.Size = UDim2.new(1, -10, 0, height)
+    runtimeScroll.CanvasSize = UDim2.new(0, 0, 0, height + 8)
+    runtimeScroll.CanvasPosition = Vector2.new(0, math.max(0, height - runtimeScroll.AbsoluteSize.Y))
+end
+
+local function runtimeInteresting(obj)
+    return obj:IsA("Model")
+        or obj:IsA("BasePart")
+        or obj:IsA("Decal")
+        or obj:IsA("Texture")
+        or obj:IsA("BillboardGui")
+        or obj:IsA("SurfaceGui")
+        or obj:IsA("ParticleEmitter")
+        or obj:IsA("Humanoid")
+        or obj:IsA("RemoteEvent")
+        or obj:IsA("RemoteFunction")
+        or obj:IsA("Sound")
+end
+
+local function watchRuntimeObject(obj)
+    if not runtimeEnabled or runtimeWatched[obj] or #runtimeConnections >= RUNTIME_MAX_WATCHED then return end
+    if not runtimeInteresting(obj) then return end
+    runtimeWatched[obj] = true
+
+    local properties = {}
+    if obj:IsA("BasePart") then
+        properties = {"Transparency", "LocalTransparencyModifier", "Anchored"}
+    elseif obj:IsA("Decal") or obj:IsA("Texture") then
+        properties = {"Transparency"}
+    elseif obj:IsA("BillboardGui") or obj:IsA("SurfaceGui") then
+        properties = {"Enabled"}
+    elseif obj:IsA("ParticleEmitter") then
+        properties = {"Enabled"}
+    elseif obj:IsA("Humanoid") then
+        properties = {"Health"}
+    end
+
+    for _, property in ipairs(properties) do
+        local ok, signal = pcall(function() return obj:GetPropertyChangedSignal(property) end)
+        if ok and signal then
+            local connection = signal:Connect(function()
+                if runtimeEnabled and obj.Parent then
+                    local valueOk, value = pcall(function() return obj[property] end)
+                    if valueOk then
+                        runtimeLog("PROPERTY " .. property .. " → " .. tostring(value) .. " | " .. runtimePath(obj))
+                    end
+                end
+            end)
+            table.insert(runtimeConnections, connection)
+        end
+    end
+end
+
+local function stopRuntimeMonitor()
+    runtimeEnabled = false
+    for _, connection in ipairs(runtimeConnections) do
+        connection:Disconnect()
+    end
+    table.clear(runtimeConnections)
+    table.clear(runtimeWatched)
+    runtimePanel.Visible = false
+end
+
+local function startRuntimeMonitor()
+    if runtimeEnabled then return end
+    runtimeEnabled = true
+    runtimePanel.Visible = true
+    runtimeLog("MONITOR STARTED — client-visible changes only")
+
+    for _, obj in ipairs(Workspace:GetDescendants()) do
+        watchRuntimeObject(obj)
+        if #runtimeConnections >= RUNTIME_MAX_WATCHED then break end
+    end
+
+    table.insert(runtimeConnections, Workspace.DescendantAdded:Connect(function(obj)
+        if not runtimeEnabled then return end
+        if runtimeInteresting(obj) then
+            runtimeLog("ADDED " .. obj.ClassName .. " | " .. runtimePath(obj))
+            watchRuntimeObject(obj)
+        end
+    end))
+    table.insert(runtimeConnections, Workspace.DescendantRemoving:Connect(function(obj)
+        if runtimeEnabled and runtimeInteresting(obj) then
+            runtimeLog("REMOVED " .. obj.ClassName .. " | " .. runtimePath(obj))
+            runtimeWatched[obj] = nil
+        end
+    end))
+end
+
+runtimeClear.MouseButton1Click:Connect(function()
+    table.clear(runtimeLogs)
+    runtimeLog("LOG CLEARED")
+end)
+runtimeClose.MouseButton1Click:Connect(function()
+    runtimePanel.Visible = false
+end)
+
+-- Drag the inspector by its header
+local runtimeDragging = false
+local runtimeDragStart, runtimeStartPos
+runtimeHeader.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        runtimeDragging = true
+        runtimeDragStart = input.Position
+        runtimeStartPos = runtimePanel.Position
+    end
+end)
+UserInputService.InputChanged:Connect(function(input)
+    if runtimeDragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+        local delta = input.Position - runtimeDragStart
+        runtimePanel.Position = UDim2.new(runtimeStartPos.X.Scale, runtimeStartPos.X.Offset + delta.X, runtimeStartPos.Y.Scale, runtimeStartPos.Y.Offset + delta.Y)
+    end
+end)
+UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        runtimeDragging = false
+    end
+end)
+
+
 -- ปุ่ม ⬆ ขึ้น/กระโดด (ซ้ายบน)
 local floatUp = Instance.new("TextButton")
 floatUp.Size = UDim2.new(0,44,0,44)
@@ -675,7 +892,7 @@ scroll.BackgroundTransparency = 1
 scroll.BorderSizePixel = 0
 scroll.ScrollBarThickness = 4
 scroll.ScrollBarImageColor3 = Color3.fromRGB(80,100,220)
-scroll.CanvasSize = UDim2.new(0,0,0,590)  -- ความสูงเนื้อหาทั้งหมด
+scroll.CanvasSize = UDim2.new(0,0,0,632)  -- ความสูงเนื้อหาทั้งหมด
 scroll.ScrollingDirection = Enum.ScrollingDirection.Y
 scroll.ZIndex = 6
 scroll.Parent = panel
@@ -927,12 +1144,16 @@ createToggleButton(scroll, "Remove Fog", "☁", 469, function(state)
     setNoFog(state)
 end)
 
+createToggleButton(scroll, "Runtime Monitor", "🧪", 511, function(state)
+    if state then startRuntimeMonitor() else stopRuntimeMonitor() end
+end)
+
 local divider2 = Instance.new("Frame", scroll)
-divider2.Size = UDim2.new(1,-24,0,1); divider2.Position = UDim2.new(0,12,0,514)
+divider2.Size = UDim2.new(1,-24,0,1); divider2.Position = UDim2.new(0,12,0,556)
 divider2.BackgroundColor3 = Color3.fromRGB(50,55,90); divider2.BorderSizePixel = 0; divider2.ZIndex = 6
 
 local hint = Instance.new("TextLabel", scroll)
-hint.Size = UDim2.new(1,-24,0,60); hint.Position = UDim2.new(0,12,0,522)
+hint.Size = UDim2.new(1,-24,0,60); hint.Position = UDim2.new(0,12,0,564)
 hint.BackgroundTransparency = 1
 hint.Text = "ESP: orange NPC, green player, blue moving parts\nRemove Fog: clears local fog/atmosphere\nUp/Down buttons: jump / fly"
 hint.TextColor3 = Color3.fromRGB(90,100,140)
