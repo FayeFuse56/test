@@ -684,13 +684,15 @@ local function watchRuntimeObject(obj)
     end
 
     for _, property in ipairs(properties) do
+        local initialOk, previousValue = pcall(function() return obj[property] end)
         local ok, signal = pcall(function() return obj:GetPropertyChangedSignal(property) end)
         if ok and signal then
             local connection = signal:Connect(function()
                 if runtimeEnabled and obj.Parent then
                     local valueOk, value = pcall(function() return obj[property] end)
                     if valueOk then
-                        runtimeLog("PROPERTY " .. property .. " → " .. tostring(value) .. " | " .. runtimePath(obj))
+                        runtimeLog("PROPERTY " .. property .. ": " .. tostring(previousValue) .. " → " .. tostring(value) .. " | " .. runtimePath(obj))
+                        previousValue = value
                     end
                 end
             end)
