@@ -740,7 +740,11 @@ end
 
 local function runtimeProperties(obj)
     if obj:IsA("BasePart") then
-        return {"Transparency", "LocalTransparencyModifier", "Anchored", "CanCollide"}
+        return {"Transparency", "LocalTransparencyModifier", "Anchored", "CanCollide", "CanTouch", "CanQuery", "CFrame", "Size"}
+    elseif obj:IsA("TextLabel") or obj:IsA("TextButton") or obj:IsA("TextBox") then
+        return {"Text", "Visible"}
+    elseif obj:IsA("GuiObject") then
+        return {"Visible"}
     elseif obj:IsA("Decal") or obj:IsA("Texture") then
         return {"Transparency"}
     elseif obj:IsA("BillboardGui") or obj:IsA("SurfaceGui") then
@@ -761,6 +765,24 @@ local function runtimeProperties(obj)
         return {"Enabled"}
     end
     return {}
+end
+
+local function runtimeDescribePart(obj)
+    if not obj:IsA("BasePart") then return "" end
+    local p = obj.Position
+    local parentName = obj.Parent and obj.Parent:GetFullName() or "nil"
+    return string.format(" | parent=%s | pos=(%.1f,%.1f,%.1f) size=(%.1f,%.1f,%.1f) T=%s C=%s Touch=%s",
+        parentName, p.X, p.Y, p.Z, obj.Size.X, obj.Size.Y, obj.Size.Z,
+        tostring(obj.Transparency), tostring(obj.CanCollide), tostring(obj.CanTouch))
+end
+
+local function runtimeDescribeGui(obj)
+    if obj:IsA("TextLabel") or obj:IsA("TextButton") or obj:IsA("TextBox") then
+        local value = string.gsub(obj.Text, "[\\r\\n]", " ")
+        if #value > 90 then value = string.sub(value, 1, 90) .. "..." end
+        return " | text='" .. value .. "'"
+    end
+    return ""
 end
 
 local function runtimeDisconnectObject(obj)
@@ -843,6 +865,7 @@ local function runtimeSessionSummary()
     if remoteInstances == 0 then
         runtimeLog("LIMIT: no Remote instance lifecycle change observed. Remote calls are NOT monitored by this client logger.", "SUMMARY")
     end
+    runtimeLog("TRACE: compare ADDED/REMOVED BasePart entries, property changes, and UI text such as MISS/SUCCESS in timestamp order.", "SUMMARY")
     runtimeLog("LIMIT: client-visible logs cannot identify which script caused an event or prove server-side puzzle state.", "SUMMARY")
     runtimeLog("===== END SUMMARY =====", "SUMMARY")
 end
@@ -886,7 +909,7 @@ local function startRuntimeMonitor()
                     local kind = (isSound or obj:IsA("ParticleEmitter")) and "EFFECT"
                         or (obj:IsA("ProximityPrompt") or obj:IsA("ClickDetector") or obj:IsA("Tool")) and "INTERACTION"
                         or "ADDED"
-                    runtimeLog("ADDED " .. obj.ClassName .. " | " .. path, kind)
+                    runtimeLog("ADDED " .. obj.ClassName .. " | " .. path .. runtimeDescribePart(obj) .. runtimeDescribeGui(obj), kind)
                 end
                 watchRuntimeObject(obj, rootInfo.name)
             end
@@ -899,7 +922,7 @@ local function startRuntimeMonitor()
                     local kind = obj:IsA("ParticleEmitter") and "EFFECT"
                         or (obj:IsA("ProximityPrompt") or obj:IsA("ClickDetector") or obj:IsA("Tool")) and "INTERACTION"
                         or "REMOVED"
-                    runtimeLog("REMOVED " .. obj.ClassName .. " | " .. path, kind)
+                    runtimeLog("REMOVED " .. obj.ClassName .. " | " .. path .. runtimeDescribePart(obj) .. runtimeDescribeGui(obj), kind)
                 end
                 runtimeDisconnectObject(obj)
             end
