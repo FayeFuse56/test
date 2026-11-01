@@ -109,6 +109,7 @@ function MonsterESP.new(context, options)
 	self.ShowDistance = options.ShowDistance ~= false
 	self.Enabled = false
 	self._entries = {}
+	self.Changed = Instance.new("BindableEvent")
 	self._destroyed = false
 	self._connections = {}
 	self._refreshQueued = false
@@ -212,7 +213,8 @@ function MonsterESP:Refresh()
 	if not snapshot or not snapshot.IsKnown then return 0 end
 	local targets = resolve(snapshot)
 	for _, instance in ipairs(targets) do self:_add(instance) end
-	return #targets
+	self.Changed:Fire(self.Enabled, self:GetCount())
+	return self:GetCount()
 end
 
 function MonsterESP:SetEnabled(enabled: boolean)
@@ -222,6 +224,7 @@ function MonsterESP:SetEnabled(enabled: boolean)
 		return self:Refresh()
 	end
 	for instance in pairs(self._entries) do self:_remove(instance) end
+	self.Changed:Fire(false, 0)
 	return 0
 end
 
@@ -237,6 +240,7 @@ function MonsterESP:Destroy()
 	self._destroyed = true
 	for _, connection in ipairs(self._connections) do connection:Disconnect() end
 	table.clear(self._connections)
+	self.Changed:Destroy()
 end
 
 return MonsterESP
