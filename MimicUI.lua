@@ -597,7 +597,7 @@ runtimeHeader.ZIndex = 21
 Instance.new("UICorner", runtimeHeader).CornerRadius = UDim.new(0, 10)
 
 local runtimeTitle = Instance.new("TextLabel", runtimeHeader)
-runtimeTitle.Size = UDim2.new(1, -158, 1, 0)
+runtimeTitle.Size = UDim2.new(1, -210, 1, 0)
 runtimeTitle.Position = UDim2.new(0, 9, 0, 0)
 runtimeTitle.BackgroundTransparency = 1
 runtimeTitle.Text = "Fay Runtime Inspector"
