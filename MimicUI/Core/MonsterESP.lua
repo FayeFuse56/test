@@ -5,6 +5,7 @@
 
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
+local RunService = game:GetService("RunService")
 
 local MonsterESP = {}
 MonsterESP.__index = MonsterESP
@@ -57,9 +58,11 @@ local function resolve(context)
 		addModel(result, seen, childPath(world, {"Section2", "Monsters", "Ashina"}))
 	elseif group == "B2C3" then
 		local maze = childPath(world, {"Section1", "Maze"})
-		local mode = maze and maze:GetAttribute("GameMode")
-		local grinName = mode == "Nightmare" and "GrinDemonNM" or "GrinDemon"
-		addModel(result, seen, maze and maze:FindFirstChild(grinName))
+		if maze then
+			-- Resolve whichever variant is actually replicated to this client.
+			addModel(result, seen, maze:FindFirstChild("GrinDemon"))
+			addModel(result, seen, maze:FindFirstChild("GrinDemonNM"))
+		end
 		local statues = childPath(world, {"Section4", "StatueMonsters"})
 		addChildren(result, seen, statues, true)
 	elseif group == "B2C4" then
@@ -107,9 +110,29 @@ function MonsterESP.new(context, options)
 	self.Enabled = false
 	self._entries = {}
 	self._destroyed = false
-	self._connection = self.Context.Changed.Event:Connect(function()
+	self._connections = {}
+	self._refreshQueued = false
+	self._distanceAccumulator = 0
+	table.insert(self._connections, self.Context.Changed.Event:Connect(function()
 		if self.Enabled then self:Refresh() end
-	end)
+	end))
+	local function queueRefresh()
+		if not self.Enabled or self._refreshQueued or self._destroyed then return end
+		self._refreshQueued = true
+		task.defer(function()
+			self._refreshQueued = false
+			if self.Enabled and not self._destroyed then self:Refresh() end
+		end)
+	end
+	table.insert(self._connections, Workspace.DescendantAdded:Connect(queueRefresh))
+	table.insert(self._connections, Workspace.DescendantRemoving:Connect(queueRefresh))
+	table.insert(self._connections, RunService.Heartbeat:Connect(function(deltaTime)
+		if not self.Enabled or not self.ShowDistance then return end
+		self._distanceAccumulator += deltaTime
+		if self._distanceAccumulator < 0.25 then return end
+		self._distanceAccumulator = 0
+		self:_updateDistances()
+	end))
 	return self
 end
 
@@ -167,6 +190,21 @@ function MonsterESP:_add(instance)
 	self._entries[instance] = {Highlight = highlight, Billboard = billboard}
 end
 
+function MonsterESP:_updateDistances()
+	local snapshot = self.Context:Get()
+	local root = snapshot and snapshot.RootPart
+	if not root then return end
+	for instance, entry in pairs(self._entries) do
+		local adornee = getAdornee(instance)
+		local label = entry.Billboard and entry.Billboard:FindFirstChild("Label")
+		if adornee and label and label:IsA("TextLabel") then
+			local name = self.ShowNames and instance.Name or "MONSTER"
+			local distance = (root.Position - adornee.Position).Magnitude
+			label.Text = string.format("%s  [%.0fm]", name, distance)
+		end
+	end
+end
+
 function MonsterESP:Refresh()
 	if self._destroyed or not self.Enabled then return 0 end
 	for instance in pairs(self._entries) do self:_remove(instance) end
@@ -197,7 +235,8 @@ function MonsterESP:Destroy()
 	if self._destroyed then return end
 	self:SetEnabled(false)
 	self._destroyed = true
-	if self._connection then self._connection:Disconnect() self._connection = nil end
+	for _, connection in ipairs(self._connections) do connection:Disconnect() end
+	table.clear(self._connections)
 end
 
 return MonsterESP
