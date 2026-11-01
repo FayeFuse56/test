@@ -117,7 +117,9 @@ function MonsterESP.new(context, options)
 	table.insert(self._connections, self.Context.Changed.Event:Connect(function()
 		if self.Enabled then self:Refresh() end
 	end))
-	local function queueRefresh()
+	local function queueRefresh(instance)
+		if instance and (instance.Name == "MimicUI_MonsterHighlight"
+			or instance:FindFirstAncestor("MimicUI_MonsterLabel")) then return end
 		if not self.Enabled or self._refreshQueued or self._destroyed then return end
 		self._refreshQueued = true
 		task.defer(function()
