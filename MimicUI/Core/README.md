@@ -33,6 +33,23 @@ print("MimicUI context:", state.ActiveGroup, state.Context.PlaceId)
 -- registry:Destroy()
 ```
 
+- `ChapterPanel.lua` — renders a compact dark-blue panel with the detected chapter, map, PlaceId, character readiness, and feature catalog.
+
+## Showing the panel
+
+After creating the context, registry and controller, create the panel:
+
+```lua
+local ChapterPanel = require(Core:WaitForChild("ChapterPanel"))
+local panel = ChapterPanel.new(context, registry)
+
+-- Optional:
+-- panel:SetVisible(false)
+-- panel:Destroy()
+```
+
+The panel is a read-only status/catalog view. It does not turn Planned or Existing catalog entries into working controls. Existing MimicUI functionality still needs to be migrated and connected separately.
+
 ## Feature status
 
 Catalog entries marked `Ready` describe context fields already supplied by the core. `Existing` refers to functionality present in the older MimicUI script but not yet integrated into this modular core. `Planned` entries are UI roadmap items, not working controls yet.
