@@ -560,6 +560,7 @@ local runtimeWatchedCount = 0
 local runtimeLogs = {}
 local runtimeSession = {}
 local runtimeSessionActive = false
+local runtimeSeenSounds = {}
 local runtimeMarkButton
 local RUNTIME_MAX_LOGS = 140
 local RUNTIME_MAX_WATCHED = 2200
@@ -696,6 +697,19 @@ local function runtimeInteresting(obj)
         or obj:IsA("ProximityPrompt")
         or obj:IsA("ClickDetector")
         or obj:IsA("Tool")
+end
+
+local function runtimeShouldLogSound(obj, rootName)
+    -- Footstep/ambient loops add noise and rarely identify puzzle logic.
+    local name = string.lower(obj.Name)
+    local noisy = {"footstep", "footsteps", "step", "walking", "walk", "running", "run", "chase", "heartbeat", "ambience", "ambient"}
+    for _, word in ipairs(noisy) do
+        if string.find(name, word, 1, true) then return false end
+    end
+    local key = runtimeScopedPath(rootName, obj)
+    if runtimeSeenSounds[key] then return false end
+    runtimeSeenSounds[key] = true
+    return true
 end
 
 local function runtimePuzzleName(text)
@@ -866,20 +880,27 @@ local function startRuntimeMonitor()
             if not runtimeEnabled then return end
             if runtimeInteresting(obj) then
                 local path = runtimeScopedPath(rootInfo.name, obj)
-                local kind = (obj:IsA("Sound") or obj:IsA("ParticleEmitter")) and "EFFECT"
-                    or (obj:IsA("ProximityPrompt") or obj:IsA("ClickDetector") or obj:IsA("Tool")) and "INTERACTION"
-                    or "ADDED"
-                runtimeLog("ADDED " .. obj.ClassName .. " | " .. path, kind)
+                local isSound = obj:IsA("Sound")
+                local shouldLog = not isSound or runtimeShouldLogSound(obj, rootInfo.name)
+                if shouldLog then
+                    local kind = (isSound or obj:IsA("ParticleEmitter")) and "EFFECT"
+                        or (obj:IsA("ProximityPrompt") or obj:IsA("ClickDetector") or obj:IsA("Tool")) and "INTERACTION"
+                        or "ADDED"
+                    runtimeLog("ADDED " .. obj.ClassName .. " | " .. path, kind)
+                end
                 watchRuntimeObject(obj, rootInfo.name)
             end
         end)
         local removing = root.DescendantRemoving:Connect(function(obj)
             if runtimeEnabled and runtimeInteresting(obj) then
-                local path = runtimeScopedPath(rootInfo.name, obj)
-                local kind = (obj:IsA("Sound") or obj:IsA("ParticleEmitter")) and "EFFECT"
-                    or (obj:IsA("ProximityPrompt") or obj:IsA("ClickDetector") or obj:IsA("Tool")) and "INTERACTION"
-                    or "REMOVED"
-                runtimeLog("REMOVED " .. obj.ClassName .. " | " .. path, kind)
+                -- Sound cleanup is intentionally silent: looping/temporary SFX flood the timeline.
+                if not obj:IsA("Sound") then
+                    local path = runtimeScopedPath(rootInfo.name, obj)
+                    local kind = obj:IsA("ParticleEmitter") and "EFFECT"
+                        or (obj:IsA("ProximityPrompt") or obj:IsA("ClickDetector") or obj:IsA("Tool")) and "INTERACTION"
+                        or "REMOVED"
+                    runtimeLog("REMOVED " .. obj.ClassName .. " | " .. path, kind)
+                end
                 runtimeDisconnectObject(obj)
             end
         end)
@@ -892,6 +913,7 @@ runtimeMarkButton.MouseButton1Click:Connect(function()
     if not runtimeEnabled then return end
     if not runtimeSessionActive then
         table.clear(runtimeSession)
+        table.clear(runtimeSeenSounds)
         runtimeSessionActive = true
         runtimeMarkButton.Text = "END"
         runtimeLog("===== PUZZLE TEST START — activate bypass now =====", "MARKER")
