@@ -654,12 +654,21 @@ local function runtimePath(obj)
     return ok and result or obj.Name
 end
 
+local function runtimeScopedPath(rootName, obj)
+    local path = runtimePath(obj)
+    if string.sub(path, 1, #rootName + 1) == rootName .. "." then
+        return path
+    end
+    return rootName .. "." .. path
+end
+
 local function runtimeLog(message, eventType)
     local stamp = os.date("%H:%M:%S")
     local line = "[" .. stamp .. "] " .. tostring(message)
     table.insert(runtimeLogs, line)
     if runtimeSessionActive then
         table.insert(runtimeSession, {line = line, type = eventType or "OTHER"})
+        if #runtimeSession > 600 then table.remove(runtimeSession, 1) end
     end
     while #runtimeLogs > RUNTIME_MAX_LOGS do
         table.remove(runtimeLogs, 1)
@@ -725,7 +734,7 @@ local function runtimeProperties(obj)
     elseif obj:IsA("ParticleEmitter") then
         return {"Enabled", "Rate"}
     elseif obj:IsA("Sound") then
-        return {"Playing", "Volume", "TimePosition"}
+        return {"Playing", "Volume"}
     elseif obj:IsA("Humanoid") then
         return {"Health", "WalkSpeed", "JumpPower"}
     elseif obj:IsA("ValueBase") then
@@ -762,7 +771,7 @@ local function watchRuntimeObject(obj, rootName)
     runtimeWatchedCount += 1
     local connections = {}
     runtimeObjectConnections[obj] = connections
-    local path = rootName .. "." .. runtimePath(obj)
+    local path = runtimeScopedPath(rootName, obj)
 
     for _, property in ipairs(runtimeProperties(obj)) do
         local initialOk, previousValue = pcall(function() return obj[property] end)
@@ -856,7 +865,7 @@ local function startRuntimeMonitor()
         local added = root.DescendantAdded:Connect(function(obj)
             if not runtimeEnabled then return end
             if runtimeInteresting(obj) then
-                local path = rootInfo.name .. "." .. runtimePath(obj)
+                local path = runtimeScopedPath(rootInfo.name, obj)
                 local kind = (obj:IsA("Sound") or obj:IsA("ParticleEmitter")) and "EFFECT"
                     or (obj:IsA("ProximityPrompt") or obj:IsA("ClickDetector") or obj:IsA("Tool")) and "INTERACTION"
                     or "ADDED"
@@ -866,7 +875,7 @@ local function startRuntimeMonitor()
         end)
         local removing = root.DescendantRemoving:Connect(function(obj)
             if runtimeEnabled and runtimeInteresting(obj) then
-                local path = rootInfo.name .. "." .. runtimePath(obj)
+                local path = runtimeScopedPath(rootInfo.name, obj)
                 local kind = (obj:IsA("Sound") or obj:IsA("ParticleEmitter")) and "EFFECT"
                     or (obj:IsA("ProximityPrompt") or obj:IsA("ClickDetector") or obj:IsA("Tool")) and "INTERACTION"
                     or "REMOVED"
