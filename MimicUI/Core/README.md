@@ -7,6 +7,33 @@
 - `UIRegistry.lua` — stores feature descriptors by chapter group.
 - `ChapterCatalog.lua` — declarative list of common and chapter-specific inspector features, with implementation status.
 - `Controller.lua` — connects context changes to the active catalog group.
+- `MonsterESP.lua` — chapter-aware local monster highlights, labels, spawn refresh and distance updates.
+- `ChapterPanel.lua` — runtime chapter panel with Monster ESP toggle.
+- `Bootstrap.lua` — one-call client setup and cleanup.
+
+## Quick start (recommended)
+
+Add every file in this folder as a ModuleScript under one Folder named `Core`. Add a LocalScript beside that folder and use:
+
+```lua
+local Core = script.Parent:WaitForChild("Core")
+local Bootstrap = require(Core:WaitForChild("Bootstrap"))
+
+local mimic = Bootstrap.Start({
+    ShowNames = true,
+    ShowDistance = true,
+    EnableMonsterESP = false, -- click the in-panel button to enable it
+})
+
+-- Optional control from your own UI:
+-- mimic:SetMonsterESPEnabled(true)
+-- print(mimic:GetState().ActiveGroup)
+
+-- On shutdown:
+-- mimic:Destroy()
+```
+
+This creates the chapter panel and connects its **MONSTER ESP** button to the MonsterESP module. The ESP refreshes when client-visible Workspace instances are added/removed and updates displayed distance while enabled.
 
 ## Studio layout
 
@@ -75,7 +102,7 @@ monsterESP:Refresh()
 -- monsterESP:Destroy()
 ```
 
-The resolver uses chapter-specific Workspace paths reviewed in the reference source (Book 1 AI folders, named Book 2 monsters, Jigoku, Witch Trial and Halloween Trial). The B2C3 Nightmare/Normal Grin Demon selection falls back to the Normal model if the mode is not exposed as the expected attribute. Object names and folder layouts can change between game updates; verify each chapter in Studio before relying on the result. This module is not yet connected to a toggle in the existing MimicUI menu.
+The resolver uses chapter-specific Workspace paths reviewed in the reference source (Book 1 AI folders, named Book 2 monsters, Jigoku, Witch Trial and Halloween Trial). The B2C3 Nightmare/Normal Grin Demon selection falls back to the Normal model if the mode is not exposed as the expected attribute. Object names and folder layouts can change between game updates; verify each chapter in Studio before relying on the result. The panel toggle is wired through `Bootstrap.lua`; the module remains separate from the older monolithic `MimicUI.lua` until that legacy script is deliberately replaced.
 
 ## Feature status
 
