@@ -212,7 +212,10 @@ function MonsterESP:Refresh()
 	if self._destroyed or not self.Enabled then return 0 end
 	for instance in pairs(self._entries) do self:_remove(instance) end
 	local snapshot = self.Context:Get()
-	if not snapshot or not snapshot.IsKnown then return 0 end
+	if not snapshot or not snapshot.IsKnown then
+		self.Changed:Fire(self.Enabled, 0)
+		return 0
+	end
 	local targets = resolve(snapshot)
 	for _, instance in ipairs(targets) do self:_add(instance) end
 	self.Changed:Fire(self.Enabled, self:GetCount())
