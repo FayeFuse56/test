@@ -31,6 +31,7 @@ function ChapterPanel.new(context, registry, options)
 	local self = setmetatable({}, ChapterPanel)
 	self.Context = assert(context, "GameContext is required")
 	self.Registry = assert(registry, "UIRegistry is required")
+	self.MonsterESP = options.MonsterESP
 	self._connections = {}
 	self._destroyed = false
 
@@ -48,7 +49,7 @@ function ChapterPanel.new(context, registry, options)
 		Name = "Panel",
 		AnchorPoint = Vector2.new(1, 0),
 		Position = UDim2.new(1, -18, 0, 18),
-		Size = UDim2.fromOffset(310, 390),
+		Size = UDim2.fromOffset(310, 420),
 		BackgroundColor3 = COLORS.Panel,
 		BorderSizePixel = 0,
 	}, gui)
@@ -89,10 +90,30 @@ function ChapterPanel.new(context, registry, options)
 		TextWrapped = true,
 	}, header)
 
+	self.ESPButton = make("TextButton", {
+		Name = "MonsterESPButton",
+		Position = UDim2.fromOffset(14, 84),
+		Size = UDim2.new(1, -28, 0, 32),
+		BackgroundColor3 = COLORS.Row,
+		BorderSizePixel = 0,
+		Font = Enum.Font.GothamBold,
+		Text = "MONSTER ESP  •  OFF",
+		TextColor3 = COLORS.Muted,
+		TextSize = 11,
+		AutoButtonColor = true,
+	}, panel)
+	make("UICorner", {CornerRadius = UDim.new(0, 8)}, self.ESPButton)
+	make("UIStroke", {Color = COLORS.Accent, Transparency = 0.55, Thickness = 1}, self.ESPButton)
+	self.ESPButton.Activated:Connect(function()
+		if not self.MonsterESP then return end
+		self.MonsterESP:SetEnabled(not self.MonsterESP.Enabled)
+		self:_render()
+	end)
+
 	self.List = make("ScrollingFrame", {
 		Name = "FeatureList",
-		Position = UDim2.fromOffset(10, 86),
-		Size = UDim2.new(1, -20, 1, -96),
+		Position = UDim2.fromOffset(10, 124),
+		Size = UDim2.new(1, -20, 1, -134),
 		BackgroundTransparency = 1,
 		BorderSizePixel = 0,
 		CanvasSize = UDim2.fromOffset(0, 0),
@@ -136,6 +157,11 @@ function ChapterPanel:_render()
 	local mapName = snapshot.SubMap and (" / " .. snapshot.SubMap) or ""
 	self.Title.Text = "MIMICUI  /  " .. string.upper(displayName)
 	self.Subtitle.Text = string.format("PlaceId: %d%s  •  %s", snapshot.PlaceId, mapName, snapshot.Character and "Character ready" or "Waiting for character")
+	local espEnabled = self.MonsterESP and self.MonsterESP.Enabled
+	local espCount = self.MonsterESP and self.MonsterESP:GetCount() or 0
+	self.ESPButton.Text = string.format("MONSTER ESP  •  %s  (%d)", espEnabled and "ON" or "OFF", espCount)
+	self.ESPButton.TextColor3 = espEnabled and COLORS.Ready or COLORS.Muted
+	self.ESPButton.BackgroundColor3 = espEnabled and Color3.fromRGB(26, 55, 53) or COLORS.Row
 
 	self:_clearRows()
 	for index, feature in ipairs(features) do
