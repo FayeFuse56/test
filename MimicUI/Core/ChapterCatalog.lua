@@ -16,6 +16,7 @@ end
 local COMMON = {
 	feature("context", "Game Context", "PlaceId, chapter, map and character status", "Ready"),
 	feature("runtime-monitor", "Runtime Monitor", "Observe client-visible Instance changes", "Existing"),
+	feature("monster-esp", "Monster ESP", "Highlight chapter-specific client-visible monsters", "Ready"),
 	feature("object-browser", "Object Browser", "Inspect selected Workspace objects and properties", "Planned"),
 	feature("local-esp", "Local ESP", "Highlight selected client-visible NPCs and objects", "Planned"),
 }
