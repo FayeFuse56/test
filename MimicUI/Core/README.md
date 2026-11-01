@@ -1,42 +1,42 @@
 # MimicUI Core
 
-These modules are the first modular foundation for the existing MimicUI project.
+## Modules
 
-## Files
-
-- GameDetector.lua — maps known The Mimic PlaceIds to logical groups and known sub-map labels.
-- GameContext.lua — exposes a snapshot of the current place and local character, and refreshes it on character lifecycle events.
-- UIRegistry.lua — stores feature descriptors by chapter group and exposes the active group to a UI renderer.
+- `GameDetector.lua` — maps known The Mimic PlaceIds to logical groups and sub-map labels.
+- `GameContext.lua` — provides a snapshot of the current place and local character, refreshing on character lifecycle events.
+- `UIRegistry.lua` — stores feature descriptors by chapter group.
+- `ChapterCatalog.lua` — declarative list of common and chapter-specific inspector features, with implementation status.
+- `Controller.lua` — connects context changes to the active catalog group.
 
 ## Studio layout
 
-Create a MimicUI folder with a Core folder containing these three ModuleScripts. Require them from the client entrypoint:
+Place these ModuleScripts in `MimicUI/Core`. The LocalScript entrypoint can initialize them as follows:
 
 ```lua
 local Core = script.Parent:WaitForChild("Core")
 local GameDetector = require(Core:WaitForChild("GameDetector"))
 local GameContext = require(Core:WaitForChild("GameContext"))
 local UIRegistry = require(Core:WaitForChild("UIRegistry"))
+local ChapterCatalog = require(Core:WaitForChild("ChapterCatalog"))
+local Controller = require(Core:WaitForChild("Controller"))
 
 local context = GameContext.new(GameDetector)
 local registry = UIRegistry.new()
+local controller = Controller.new(GameDetector, context, registry, ChapterCatalog)
 
-local snapshot = context:Get()
-registry:SetActiveGroup(snapshot.Group)
-
-context.Changed.Event:Connect(function(nextSnapshot)
-    registry:SetActiveGroup(nextSnapshot.Group)
-end)
+local state = controller:GetState()
+print("MimicUI context:", state.ActiveGroup, state.Context.PlaceId)
 
 -- On shutdown:
+-- controller:Destroy()
 -- context:Destroy()
 -- registry:Destroy()
 ```
 
-The modules are not yet wired into the existing MimicUI.lua UI. That integration is the next step.
+## Feature status
 
-## Safety and test status
+Catalog entries marked `Ready` describe context fields already supplied by the core. `Existing` refers to functionality present in the older MimicUI script but not yet integrated into this modular core. `Planned` entries are UI roadmap items, not working controls yet.
 
-The detector only identifies the current PlaceId. The context reports client-visible state. The registry only stores local feature descriptors. These modules do not call game remotes, invoke exploit APIs, bypass anti-cheat, or claim to complete game objectives.
+## Scope and test status
 
-PlaceId mappings are transcribed from the project's reviewed reference script. Unknown PlaceIds intentionally return Group = nil. Static review only; not yet validated in a live Roblox session.
+These modules inspect client-visible state and organize local UI metadata. They do not invoke game remotes, exploit APIs, anti-cheat bypasses, or automated objective completion. PlaceId mappings are transcribed from the reviewed reference script; unknown IDs intentionally return no chapter group. Static review only — not yet validated in a live Roblox session.
