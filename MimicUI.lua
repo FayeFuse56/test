@@ -547,6 +547,7 @@ local screenGui = Instance.new("ScreenGui")
 screenGui.Name = "MimicUI"
 screenGui.ResetOnSpawn = false
 screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+screenGui.DisplayOrder = 1000 -- ให้อยู่เหนือ UI เกม; สามารถลากหลบได้
 screenGui.Parent = player.PlayerGui
 
 -- ============================================
@@ -1114,30 +1115,83 @@ scroll.ZIndex = 6
 scroll.Parent = panel
 
 -- ============================================
--- Drag logic (ลาก panel)
+-- Drag + Resize logic (รองรับเมาส์และจอสัมผัส)
 -- ============================================
 local draggingPanel = false
+local resizingPanel = false
 local dragStart, startPos
+local resizeStart, startSize
+
+local function getViewportSize()
+	local cameraNow = Workspace.CurrentCamera
+	return cameraNow and cameraNow.ViewportSize or Vector2.new(800, 600)
+end
+
+local function clampPanelPosition()
+	local viewport = getViewportSize()
+	local size = panel.AbsoluteSize
+	local x = math.clamp(panel.Position.X.Offset, 0, math.max(0, viewport.X - size.X))
+	local y = math.clamp(panel.Position.Y.Offset, 0, math.max(0, viewport.Y - size.Y))
+	panel.Position = UDim2.fromOffset(x, y)
+end
+
+-- มุมจับปรับขนาด
+local resizeHandle = Instance.new("TextButton")
+resizeHandle.Name = "ResizeHandle"
+resizeHandle.Size = UDim2.fromOffset(28, 28)
+resizeHandle.AnchorPoint = Vector2.new(1, 1)
+resizeHandle.Position = UDim2.new(1, -3, 1, -3)
+resizeHandle.BackgroundColor3 = Color3.fromRGB(45, 55, 95)
+resizeHandle.BackgroundTransparency = 0.08
+resizeHandle.BorderSizePixel = 0
+resizeHandle.Text = "◢"
+resizeHandle.TextColor3 = Color3.fromRGB(170, 190, 255)
+resizeHandle.TextSize = 16
+resizeHandle.Font = Enum.Font.GothamBold
+resizeHandle.AutoButtonColor = true
+resizeHandle.Active = true
+resizeHandle.ZIndex = 30
+resizeHandle.Parent = panel
+Instance.new("UICorner", resizeHandle).CornerRadius = UDim.new(0, 7)
 
 titleBar.InputBegan:Connect(function(input)
 	if input.UserInputType == Enum.UserInputType.MouseButton1
 		or input.UserInputType == Enum.UserInputType.Touch then
 		draggingPanel = true
-		dragStart  = input.Position
-		startPos   = panel.Position
+		dragStart = input.Position
+		startPos = panel.Position
+	end
+end)
+
+resizeHandle.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1
+		or input.UserInputType == Enum.UserInputType.Touch then
+		resizingPanel = true
+		resizeStart = input.Position
+		startSize = panel.AbsoluteSize
 	end
 end)
 
 UserInputService.InputChanged:Connect(function(input)
-	if draggingPanel and (
-		input.UserInputType == Enum.UserInputType.MouseMovement or
-		input.UserInputType == Enum.UserInputType.Touch
-	) then
+	local pointerInput = input.UserInputType == Enum.UserInputType.MouseMovement
+		or input.UserInputType == Enum.UserInputType.Touch
+	if not pointerInput then return end
+
+	if draggingPanel then
 		local delta = input.Position - dragStart
-		panel.Position = UDim2.new(
-			startPos.X.Scale, startPos.X.Offset + delta.X,
-			startPos.Y.Scale, startPos.Y.Offset + delta.Y
-		)
+		local viewport = getViewportSize()
+		local width, height = panel.AbsoluteSize.X, panel.AbsoluteSize.Y
+		local x = math.clamp(startPos.X.Offset + delta.X, 0, math.max(0, viewport.X - width))
+		local y = math.clamp(startPos.Y.Offset + delta.Y, 0, math.max(0, viewport.Y - height))
+		panel.Position = UDim2.fromOffset(x, y)
+	elseif resizingPanel then
+		local delta = input.Position - resizeStart
+		local viewport = getViewportSize()
+		local maxWidth = math.max(240, viewport.X - panel.AbsolutePosition.X - 8)
+		local maxHeight = math.max(300, viewport.Y - panel.AbsolutePosition.Y - 8)
+		local width = math.clamp(startSize.X + delta.X, 240, math.min(520, maxWidth))
+		local height = math.clamp(startSize.Y + delta.Y, 300, math.min(760, maxHeight))
+		panel.Size = UDim2.fromOffset(width, height)
 	end
 end)
 
@@ -1145,6 +1199,7 @@ UserInputService.InputEnded:Connect(function(input)
 	if input.UserInputType == Enum.UserInputType.MouseButton1
 		or input.UserInputType == Enum.UserInputType.Touch then
 		draggingPanel = false
+		resizingPanel = false
 	end
 end)
 
