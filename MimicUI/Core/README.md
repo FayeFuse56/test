@@ -50,6 +50,33 @@ local panel = ChapterPanel.new(context, registry)
 
 The panel is a read-only status/catalog view. It does not turn Planned or Existing catalog entries into working controls. Existing MimicUI functionality still needs to be migrated and connected separately.
 
+- `MonsterESP.lua` — chapter-aware, client-side highlights for known monster/NPC paths. It excludes player characters and creates only local Highlight and BillboardGui instances.
+
+## Monster ESP
+
+Create the module after `context`:
+
+```lua
+local MonsterESP = require(Core:WaitForChild("MonsterESP"))
+local monsterESP = MonsterESP.new(context, {
+    ShowNames = true,
+    ShowDistance = true,
+})
+
+-- Enable and get the number of detected targets:
+local count = monsterESP:SetEnabled(true)
+print("Monsters highlighted:", count)
+
+-- Re-scan after the chapter finishes loading:
+monsterESP:Refresh()
+
+-- Disable / cleanup:
+-- monsterESP:SetEnabled(false)
+-- monsterESP:Destroy()
+```
+
+The resolver uses chapter-specific Workspace paths reviewed in the reference source (Book 1 AI folders, named Book 2 monsters, Jigoku, Witch Trial and Halloween Trial). The B2C3 Nightmare/Normal Grin Demon selection falls back to the Normal model if the mode is not exposed as the expected attribute. Object names and folder layouts can change between game updates; verify each chapter in Studio before relying on the result. This module is not yet connected to a toggle in the existing MimicUI menu.
+
 ## Feature status
 
 Catalog entries marked `Ready` describe context fields already supplied by the core. `Existing` refers to functionality present in the older MimicUI script but not yet integrated into this modular core. `Planned` entries are UI roadmap items, not working controls yet.
