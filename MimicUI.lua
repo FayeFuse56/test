@@ -622,9 +622,10 @@ local function runtimeButton(text, x, width)
     return b
 end
 
-runtimeMarkButton = runtimeButton("MARK", -151, 44)
-local runtimeClear = runtimeButton("CLEAR", -102, 46)
-local runtimeClose = runtimeButton("×", -49, 40)
+runtimeMarkButton = runtimeButton("MARK", -202, 44)
+local runtimeExport = runtimeButton("EXPORT", -153, 50)
+local runtimeClear = runtimeButton("CLEAR", -98, 46)
+local runtimeClose = runtimeButton("×", -47, 38)
 
 local runtimeScroll = Instance.new("ScrollingFrame", runtimePanel)
 runtimeScroll.Position = UDim2.new(0, 6, 0, 40)
@@ -947,6 +948,66 @@ runtimeMarkButton.MouseButton1Click:Connect(function()
         runtimeMarkButton.Text = "MARK"
         runtimeSessionSummary()
     end
+end)
+
+-- Export logs: prefer Delta file APIs; fall back to clipboard when unavailable.
+runtimeExport.MouseButton1Click:Connect(function()
+    local output = {}
+    table.insert(output, "MimicUI Runtime Log")
+    table.insert(output, "Exported: " .. os.date("%Y-%m-%d %H:%M:%S"))
+    table.insert(output, "========================================")
+
+    table.insert(output, "")
+    table.insert(output, "[RECENT LOGS]")
+    for _, line in ipairs(runtimeLogs) do
+        table.insert(output, line)
+    end
+
+    if #runtimeSession > 0 then
+        table.insert(output, "")
+        table.insert(output, "[MARKED SESSION]")
+        for _, entry in ipairs(runtimeSession) do
+            table.insert(output, entry.line or tostring(entry))
+        end
+    end
+
+    local contents = table.concat(output, "\\n")
+    local filename = "MimicUI_Log_" .. os.date("%Y%m%d_%H%M%S") .. ".txt"
+    local saved = false
+    local saveError = nil
+
+    if type(writefile) == "function" then
+        local ok, err = pcall(function()
+            if type(makefolder) == "function" then
+                pcall(makefolder, "MimicUI")
+                filename = "MimicUI/" .. filename
+            end
+            writefile(filename, contents)
+        end)
+        saved = ok
+        if not ok then saveError = tostring(err) end
+    end
+
+    if saved then
+        runtimeExport.Text = "SAVED!"
+        runtimeLog("LOG EXPORTED: " .. filename, "SYSTEM")
+    elseif type(setclipboard) == "function" then
+        local ok, err = pcall(setclipboard, contents)
+        if ok then
+            runtimeExport.Text = "COPIED"
+            runtimeLog("FILE API unavailable; log copied to clipboard", "SYSTEM")
+        else
+            runtimeExport.Text = "FAILED"
+            runtimeLog("EXPORT FAILED: " .. tostring(err or saveError or "unknown error"), "SYSTEM")
+        end
+    else
+        runtimeExport.Text = "NO API"
+        runtimeLog("EXPORT unavailable: Delta file/clipboard API not found", "SYSTEM")
+    end
+
+    task.delay(2, function()
+        if runtimeExport and runtimeExport.Parent then runtimeExport.Text = "EXPORT" end
+    end)
 end)
 
 runtimeClear.MouseButton1Click:Connect(function()
