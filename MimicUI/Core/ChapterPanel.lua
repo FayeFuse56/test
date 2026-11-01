@@ -139,6 +139,11 @@ function ChapterPanel.new(context, registry, options)
 	table.insert(self._connections, self.Registry:OnChanged():Connect(function()
 		self:_render()
 	end))
+	if self.MonsterESP and self.MonsterESP.Changed then
+		table.insert(self._connections, self.MonsterESP.Changed.Event:Connect(function()
+			self:_render()
+		end))
+	end
 	return self
 end
 
