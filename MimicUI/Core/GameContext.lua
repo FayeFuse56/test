@@ -35,6 +35,9 @@ function GameContext.new(detector)
 	self._snapshot = nil
 
 	self:_refresh("Initial")
+	if self._player.Character then
+		self:_bindCharacter(self._player.Character)
+	end
 	self:_connect(self._player.CharacterAdded, function(character)
 		self:_bindCharacter(character)
 		self:_refresh("CharacterAdded")
