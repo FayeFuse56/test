@@ -550,19 +550,33 @@ screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 screenGui.Parent = player.PlayerGui
 
 -- ============================================
--- Fay Runtime Inspector — client-visible activity log
--- ============================================
+-- Fay Runtime Inspector + Puzzle Behavior Analyzer
+-- Client-side observation only: records visible Instance/property changes.
 local runtimeEnabled = false
 local runtimeConnections = {}
+local runtimeObjectConnections = {}
 local runtimeWatched = {}
+local runtimeWatchedCount = 0
 local runtimeLogs = {}
-local RUNTIME_MAX_LOGS = 80
-local RUNTIME_MAX_WATCHED = 1800
+local runtimeSession = {}
+local runtimeSessionActive = false
+local runtimeMarkButton
+local RUNTIME_MAX_LOGS = 140
+local RUNTIME_MAX_WATCHED = 2200
+
+local runtimeRoots = {
+    {name = "Workspace", instance = Workspace},
+    {name = "ReplicatedStorage", instance = game:GetService("ReplicatedStorage")},
+    {name = "ReplicatedFirst", instance = game:GetService("ReplicatedFirst")},
+    {name = "Lighting", instance = Lighting},
+    {name = "SoundService", instance = game:GetService("SoundService")},
+    {name = "PlayerGui", instance = player:WaitForChild("PlayerGui")},
+}
 
 local runtimePanel = Instance.new("Frame")
 runtimePanel.Name = "FayRuntimeInspector"
-runtimePanel.Size = UDim2.new(0, 285, 0, 220)
-runtimePanel.Position = UDim2.new(1, -295, 1, -230)
+runtimePanel.Size = UDim2.new(0, 330, 0, 270)
+runtimePanel.Position = UDim2.new(1, -340, 1, -280)
 runtimePanel.BackgroundColor3 = Color3.fromRGB(16, 18, 29)
 runtimePanel.BorderSizePixel = 0
 runtimePanel.Visible = false
@@ -574,13 +588,14 @@ runtimeStroke.Color = Color3.fromRGB(80, 110, 220)
 runtimeStroke.Thickness = 1.3
 
 local runtimeHeader = Instance.new("Frame", runtimePanel)
-runtimeHeader.Size = UDim2.new(1, 0, 0, 30)
+runtimeHeader.Size = UDim2.new(1, 0, 0, 34)
 runtimeHeader.BackgroundColor3 = Color3.fromRGB(30, 36, 62)
 runtimeHeader.BorderSizePixel = 0
 runtimeHeader.ZIndex = 21
 Instance.new("UICorner", runtimeHeader).CornerRadius = UDim.new(0, 10)
+
 local runtimeTitle = Instance.new("TextLabel", runtimeHeader)
-runtimeTitle.Size = UDim2.new(1, -95, 1, 0)
+runtimeTitle.Size = UDim2.new(1, -158, 1, 0)
 runtimeTitle.Position = UDim2.new(0, 9, 0, 0)
 runtimeTitle.BackgroundTransparency = 1
 runtimeTitle.Text = "Fay Runtime Inspector"
@@ -592,24 +607,26 @@ runtimeTitle.ZIndex = 22
 
 local function runtimeButton(text, x, width)
     local b = Instance.new("TextButton", runtimeHeader)
-    b.Size = UDim2.new(0, width, 0, 21)
-    b.Position = UDim2.new(1, x, 0, 4)
+    b.Size = UDim2.new(0, width, 0, 23)
+    b.Position = UDim2.new(1, x, 0, 5)
     b.BackgroundColor3 = Color3.fromRGB(55, 65, 100)
     b.TextColor3 = Color3.fromRGB(240, 240, 255)
     b.Text = text
     b.Font = Enum.Font.GothamBold
-    b.TextSize = 10
+    b.TextSize = 9
     b.BorderSizePixel = 0
     b.ZIndex = 23
     Instance.new("UICorner", b).CornerRadius = UDim.new(0, 5)
     return b
 end
-local runtimeClear = runtimeButton("CLEAR", -82, 38)
-local runtimeClose = runtimeButton("×", -38, 28)
+
+runtimeMarkButton = runtimeButton("MARK", -151, 44)
+local runtimeClear = runtimeButton("CLEAR", -102, 46)
+local runtimeClose = runtimeButton("×", -49, 40)
 
 local runtimeScroll = Instance.new("ScrollingFrame", runtimePanel)
-runtimeScroll.Position = UDim2.new(0, 6, 0, 35)
-runtimeScroll.Size = UDim2.new(1, -12, 1, -41)
+runtimeScroll.Position = UDim2.new(0, 6, 0, 40)
+runtimeScroll.Size = UDim2.new(1, -12, 1, -46)
 runtimeScroll.BackgroundColor3 = Color3.fromRGB(10, 12, 20)
 runtimeScroll.BackgroundTransparency = 0.15
 runtimeScroll.BorderSizePixel = 0
@@ -637,15 +654,18 @@ local function runtimePath(obj)
     return ok and result or obj.Name
 end
 
-local function runtimeLog(message)
+local function runtimeLog(message, eventType)
     local stamp = os.date("%H:%M:%S")
-    table.insert(runtimeLogs, "[" .. stamp .. "] " .. tostring(message))
+    local line = "[" .. stamp .. "] " .. tostring(message)
+    table.insert(runtimeLogs, line)
+    if runtimeSessionActive then
+        table.insert(runtimeSession, {line = line, type = eventType or "OTHER"})
+    end
     while #runtimeLogs > RUNTIME_MAX_LOGS do
         table.remove(runtimeLogs, 1)
     end
     runtimeText.Text = table.concat(runtimeLogs, "\n")
-    local lineCount = #runtimeLogs
-    local height = math.max(20, lineCount * 14 + 8)
+    local height = math.max(20, #runtimeLogs * 14 + 8)
     runtimeText.Size = UDim2.new(1, -10, 0, height)
     runtimeScroll.CanvasSize = UDim2.new(0, 0, 0, height + 8)
     runtimeScroll.CanvasPosition = Vector2.new(0, math.max(0, height - runtimeScroll.AbsoluteSize.Y))
@@ -663,42 +683,145 @@ local function runtimeInteresting(obj)
         or obj:IsA("RemoteEvent")
         or obj:IsA("RemoteFunction")
         or obj:IsA("Sound")
+        or obj:IsA("ValueBase")
+        or obj:IsA("ProximityPrompt")
+        or obj:IsA("ClickDetector")
+        or obj:IsA("Tool")
 end
 
-local function watchRuntimeObject(obj)
-    if not runtimeEnabled or runtimeWatched[obj] or #runtimeConnections >= RUNTIME_MAX_WATCHED then return end
-    if not runtimeInteresting(obj) then return end
-    runtimeWatched[obj] = true
-
-    local properties = {}
-    if obj:IsA("BasePart") then
-        properties = {"Transparency", "LocalTransparencyModifier", "Anchored"}
-    elseif obj:IsA("Decal") or obj:IsA("Texture") then
-        properties = {"Transparency"}
-    elseif obj:IsA("BillboardGui") or obj:IsA("SurfaceGui") then
-        properties = {"Enabled"}
-    elseif obj:IsA("ParticleEmitter") then
-        properties = {"Enabled"}
-    elseif obj:IsA("Humanoid") then
-        properties = {"Health"}
+local function runtimePuzzleName(text)
+    local n = string.lower(text)
+    local words = {
+        "puzzle", "lever", "switch", "button", "door", "lock", "key",
+        "ring", "rune", "symbol", "code", "plate", "statue", "altar",
+        "crystal", "orb", "torch", "lantern", "valve", "wheel",
+        "correct", "success", "complete", "opened", "solved",
+    }
+    for _, word in ipairs(words) do
+        if string.find(n, word, 1, true) then return true end
     end
+    return false
+end
 
-    for _, property in ipairs(properties) do
+local function runtimeValue(value)
+    if typeof(value) == "Vector3" then
+        return string.format("(%.1f, %.1f, %.1f)", value.X, value.Y, value.Z)
+    elseif typeof(value) == "CFrame" then
+        local p = value.Position
+        return string.format("pos(%.1f, %.1f, %.1f)", p.X, p.Y, p.Z)
+    elseif typeof(value) == "Instance" then
+        return value:GetFullName()
+    end
+    return tostring(value)
+end
+
+local function runtimeProperties(obj)
+    if obj:IsA("BasePart") then
+        return {"Transparency", "LocalTransparencyModifier", "Anchored", "CanCollide"}
+    elseif obj:IsA("Decal") or obj:IsA("Texture") then
+        return {"Transparency"}
+    elseif obj:IsA("BillboardGui") or obj:IsA("SurfaceGui") then
+        return {"Enabled"}
+    elseif obj:IsA("ParticleEmitter") then
+        return {"Enabled", "Rate"}
+    elseif obj:IsA("Sound") then
+        return {"Playing", "Volume", "TimePosition"}
+    elseif obj:IsA("Humanoid") then
+        return {"Health", "WalkSpeed", "JumpPower"}
+    elseif obj:IsA("ValueBase") then
+        return {"Value"}
+    elseif obj:IsA("ProximityPrompt") then
+        return {"Enabled", "ActionText", "ObjectText", "HoldDuration"}
+    elseif obj:IsA("ClickDetector") then
+        return {"MaxActivationDistance"}
+    elseif obj:IsA("Tool") then
+        return {"Enabled"}
+    end
+    return {}
+end
+
+local function runtimeDisconnectObject(obj)
+    local connections = runtimeObjectConnections[obj]
+    if connections then
+        for _, connection in ipairs(connections) do
+            connection:Disconnect()
+        end
+        runtimeObjectConnections[obj] = nil
+    end
+    if runtimeWatched[obj] then
+        runtimeWatched[obj] = nil
+        runtimeWatchedCount = math.max(0, runtimeWatchedCount - 1)
+    end
+end
+
+local function watchRuntimeObject(obj, rootName)
+    if not runtimeEnabled or runtimeWatched[obj] or runtimeWatchedCount >= RUNTIME_MAX_WATCHED then return end
+    if not runtimeInteresting(obj) then return end
+
+    runtimeWatched[obj] = true
+    runtimeWatchedCount += 1
+    local connections = {}
+    runtimeObjectConnections[obj] = connections
+    local path = rootName .. "." .. runtimePath(obj)
+
+    for _, property in ipairs(runtimeProperties(obj)) do
         local initialOk, previousValue = pcall(function() return obj[property] end)
         local ok, signal = pcall(function() return obj:GetPropertyChangedSignal(property) end)
         if ok and signal then
             local connection = signal:Connect(function()
-                if runtimeEnabled and obj.Parent then
-                    local valueOk, value = pcall(function() return obj[property] end)
-                    if valueOk then
-                        runtimeLog("PROPERTY " .. property .. ": " .. tostring(previousValue) .. " → " .. tostring(value) .. " | " .. runtimePath(obj))
-                        previousValue = value
-                    end
+                if not runtimeEnabled or not obj.Parent then return end
+                local valueOk, value = pcall(function() return obj[property] end)
+                if valueOk then
+                    local before = initialOk and runtimeValue(previousValue) or "?"
+                    local after = runtimeValue(value)
+                    local kind = obj:IsA("ValueBase") and "STATE" or "PROPERTY"
+                    runtimeLog(kind .. " " .. property .. ": " .. before .. " -> " .. after .. " | " .. path, kind)
+                    previousValue = value
+                    initialOk = true
                 end
             end)
-            table.insert(runtimeConnections, connection)
+            table.insert(connections, connection)
         end
     end
+end
+
+local function runtimeSessionSummary()
+    local counts = {}
+    local puzzleNamed = 0
+    local remoteInstances = 0
+    local stateChanges = 0
+    local interactions = 0
+    local effects = 0
+    for _, event in ipairs(runtimeSession) do
+        counts[event.type] = (counts[event.type] or 0) + 1
+        if string.find(string.lower(event.line), "remoteevent", 1, true)
+            or string.find(string.lower(event.line), "remotefunction", 1, true) then
+            remoteInstances += 1
+        end
+        if event.type == "STATE" then stateChanges += 1 end
+        if event.type == "INTERACTION" then interactions += 1 end
+        if event.type == "EFFECT" then effects += 1 end
+        if runtimePuzzleName(event.line) then puzzleNamed += 1 end
+    end
+
+    runtimeLog("===== SESSION EVIDENCE SUMMARY =====", "SUMMARY")
+    runtimeLog("Events: " .. #runtimeSession .. " | state changes: " .. stateChanges, "SUMMARY")
+    runtimeLog("Interactions: " .. interactions .. " | visual/audio effects: " .. effects, "SUMMARY")
+    runtimeLog("Puzzle-keyword matches: " .. puzzleNamed .. " | Remote instances added/removed: " .. remoteInstances, "SUMMARY")
+    if stateChanges > 0 then
+        runtimeLog("LEAD: state/property transitions observed; inspect exact paths and values.", "SUMMARY")
+    end
+    if interactions > 0 then
+        runtimeLog("LEAD: prompt/click/tool changes observed; sequence may indicate partial interaction.", "SUMMARY")
+    end
+    if effects > 0 then
+        runtimeLog("LEAD: effects observed; treat as correlated output, not proof of cause.", "SUMMARY")
+    end
+    if remoteInstances == 0 then
+        runtimeLog("LIMIT: no Remote instance lifecycle change observed. Remote calls are NOT monitored by this client logger.", "SUMMARY")
+    end
+    runtimeLog("LIMIT: client-visible logs cannot identify which script caused an event or prove server-side puzzle state.", "SUMMARY")
+    runtimeLog("===== END SUMMARY =====", "SUMMARY")
 end
 
 local function stopRuntimeMonitor()
@@ -707,7 +830,13 @@ local function stopRuntimeMonitor()
         connection:Disconnect()
     end
     table.clear(runtimeConnections)
+    for obj in pairs(runtimeObjectConnections) do
+        runtimeDisconnectObject(obj)
+    end
     table.clear(runtimeWatched)
+    runtimeWatchedCount = 0
+    runtimeSessionActive = false
+    runtimeMarkButton.Text = "MARK"
     runtimePanel.Visible = false
 end
 
@@ -715,32 +844,63 @@ local function startRuntimeMonitor()
     if runtimeEnabled then return end
     runtimeEnabled = true
     runtimePanel.Visible = true
-    runtimeLog("MONITOR STARTED — client-visible changes only")
+    runtimeLog("MONITOR STARTED — client-visible observation only", "SYSTEM")
+    runtimeLog("Tap MARK before using the other tool; tap again after puzzle result.", "SYSTEM")
 
-    for _, obj in ipairs(Workspace:GetDescendants()) do
-        watchRuntimeObject(obj)
-        if #runtimeConnections >= RUNTIME_MAX_WATCHED then break end
+    for _, rootInfo in ipairs(runtimeRoots) do
+        local root = rootInfo.instance
+        for _, obj in ipairs(root:GetDescendants()) do
+            watchRuntimeObject(obj, rootInfo.name)
+            if runtimeWatchedCount >= RUNTIME_MAX_WATCHED then break end
+        end
+        local added = root.DescendantAdded:Connect(function(obj)
+            if not runtimeEnabled then return end
+            if runtimeInteresting(obj) then
+                local path = rootInfo.name .. "." .. runtimePath(obj)
+                local kind = (obj:IsA("Sound") or obj:IsA("ParticleEmitter")) and "EFFECT"
+                    or (obj:IsA("ProximityPrompt") or obj:IsA("ClickDetector") or obj:IsA("Tool")) and "INTERACTION"
+                    or "ADDED"
+                runtimeLog("ADDED " .. obj.ClassName .. " | " .. path, kind)
+                watchRuntimeObject(obj, rootInfo.name)
+            end
+        end)
+        local removing = root.DescendantRemoving:Connect(function(obj)
+            if runtimeEnabled and runtimeInteresting(obj) then
+                local path = rootInfo.name .. "." .. runtimePath(obj)
+                local kind = (obj:IsA("Sound") or obj:IsA("ParticleEmitter")) and "EFFECT"
+                    or (obj:IsA("ProximityPrompt") or obj:IsA("ClickDetector") or obj:IsA("Tool")) and "INTERACTION"
+                    or "REMOVED"
+                runtimeLog("REMOVED " .. obj.ClassName .. " | " .. path, kind)
+                runtimeDisconnectObject(obj)
+            end
+        end)
+        table.insert(runtimeConnections, added)
+        table.insert(runtimeConnections, removing)
     end
-
-    table.insert(runtimeConnections, Workspace.DescendantAdded:Connect(function(obj)
-        if not runtimeEnabled then return end
-        if runtimeInteresting(obj) then
-            runtimeLog("ADDED " .. obj.ClassName .. " | " .. runtimePath(obj))
-            watchRuntimeObject(obj)
-        end
-    end))
-    table.insert(runtimeConnections, Workspace.DescendantRemoving:Connect(function(obj)
-        if runtimeEnabled and runtimeInteresting(obj) then
-            runtimeLog("REMOVED " .. obj.ClassName .. " | " .. runtimePath(obj))
-            runtimeWatched[obj] = nil
-        end
-    end))
 end
+
+runtimeMarkButton.MouseButton1Click:Connect(function()
+    if not runtimeEnabled then return end
+    if not runtimeSessionActive then
+        table.clear(runtimeSession)
+        runtimeSessionActive = true
+        runtimeMarkButton.Text = "END"
+        runtimeLog("===== PUZZLE TEST START — activate bypass now =====", "MARKER")
+    else
+        runtimeLog("===== PUZZLE TEST END — result recorded =====", "MARKER")
+        runtimeSessionActive = false
+        runtimeMarkButton.Text = "MARK"
+        runtimeSessionSummary()
+    end
+end)
 
 runtimeClear.MouseButton1Click:Connect(function()
     table.clear(runtimeLogs)
-    runtimeLog("LOG CLEARED")
+    runtimeText.Text = ""
+    if runtimeSessionActive then table.clear(runtimeSession) end
+    runtimeLog("LOG CLEARED", "SYSTEM")
 end)
+
 runtimeClose.MouseButton1Click:Connect(function()
     runtimePanel.Visible = false
 end)
